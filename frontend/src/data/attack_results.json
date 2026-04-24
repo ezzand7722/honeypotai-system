@@ -1,0 +1,50 @@
+[
+  {
+    "src_ip":"192.168.1.10",
+    "connection_count":14,
+    "success_count":11,
+    "failed_count":3,
+    "unique_passwords":10,
+    "command_count":0,
+    "suspicious_commands":0,
+    "attack":"Attack",
+    "attack_type":"Brute Force",
+    "severity":"High"
+  },
+  {
+    "src_ip":"192.168.1.20",
+    "connection_count":14,
+    "success_count":0,
+    "failed_count":3,
+    "unique_passwords":2,
+    "command_count":0,
+    "suspicious_commands":0,
+    "attack":"Attack",
+    "attack_type":"Brute Force",
+    "severity":"High"
+  },
+  {
+    "src_ip":"10.0.0.5",
+    "connection_count":14,
+    "success_count":0,
+    "failed_count":0,
+    "unique_passwords":0,
+    "command_count":0,
+    "suspicious_commands":0,
+    "attack":"Attack",
+    "attack_type":"DDoS",
+    "severity":"Medium"
+  },
+  {
+    "src_ip":"10.0.0.8",
+    "connection_count":42,
+    "success_count":0,
+    "failed_count":0,
+    "unique_passwords":0,
+    "command_count":0,
+    "suspicious_commands":0,
+    "attack":"Attack",
+    "attack_type":"DDoS",
+    "severity":"High"
+  }
+]

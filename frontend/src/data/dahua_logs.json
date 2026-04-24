@@ -1,0 +1,96 @@
+[
+  {
+    "eventid": "cowrie.session.connect",
+    "src_ip": "127.0.0.1",
+    "src_port": 48124,
+    "dst_ip": "127.0.0.1",
+    "dst_port": 2222,
+    "session": "c42c656698ae",
+    "protocol": "ssh",
+    "message": "New connection: 127.0.0.1:48124 (127.0.0.1:2222) [session: c42c656698ae]",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:02:47.076502Z"
+  },
+  {
+    "eventid": "cowrie.client.version",
+    "version": "SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.15",
+    "message": "Remote SSH version: SSH-2.0-OpenSSH_9.6p1 Ubuntu-3ubuntu13.15",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:02:47.078377Z",
+    "src_ip": "127.0.0.1",
+    "session": "c42c656698ae",
+    "protocol": "ssh"
+  },
+  {
+    "eventid": "cowrie.login.success",
+    "username": "root",
+    "password": "123456789",
+    "message": "login attempt [root/123456789] succeeded",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:02:54.194463Z",
+    "src_ip": "127.0.0.1",
+    "session": "c42c656698ae",
+    "protocol": "ssh"
+  },
+  {
+    "eventid": "cowrie.command.input",
+    "input": "uname -a",
+    "message": "CMD: uname -a",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:04:45.451250Z",
+    "src_ip": "127.0.0.1",
+    "session": "c42c656698ae",
+    "protocol": "ssh"
+  },
+  {
+    "eventid": "cowrie.login.success",
+    "username": "root",
+    "password": "moath123",
+    "message": "login attempt [root/moath123] succeeded",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:19:31.580830Z",
+    "src_ip": "127.0.0.1",
+    "session": "eb60103661bc",
+    "protocol": "ssh"
+  },
+  {
+    "eventid": "cowrie.command.input",
+    "input": "ls -R /mnt/sdcard",
+    "message": "CMD: ls -R /mnt/sdcard",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:20:01.910503Z",
+    "src_ip": "127.0.0.1",
+    "session": "eb60103661bc",
+    "protocol": "ssh"
+  },
+  {
+    "eventid": "cowrie.login.failed",
+    "username": "admin",
+    "password": "12345",
+    "message": "login attempt [admin/12345] failed",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T00:50:03.393257Z",
+    "src_ip": "127.0.0.1",
+    "session": "fdfc45f32a51",
+    "protocol": "telnet"
+  },
+  {
+    "eventid": "cowrie.login.success",
+    "username": "admin",
+    "password": "12345",
+    "message": "login attempt [admin/12345] succeeded",
+    "sensor": "muath",
+    "uuid": "74eb25f8-2a04-11f1-92a6-080027d0fc5c",
+    "timestamp": "2026-03-28T01:04:35.190967Z",
+    "src_ip": "127.0.0.1",
+    "session": "e815b01086a2",
+    "protocol": "telnet"
+  }
+]

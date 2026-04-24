@@ -1,0 +1,32 @@
+[
+  {
+    "attack_id": "attack-001",
+    "timestamp": "2026-03-30T10:00:00Z",
+    "source_ip": "203.0.113.10",
+    "destination_ip": "10.10.0.5",
+    "destination_port": 22,
+    "attack_vector": "ssh_bruteforce",
+    "metadata": {"severity": "high", "sensor": "cowrie"},
+    "payload": "login attempts=120"
+  },
+  {
+    "attack_id": "attack-002",
+    "timestamp": "2026-03-30T10:01:00Z",
+    "source_ip": "198.51.100.30",
+    "destination_ip": "10.10.0.5",
+    "destination_port": 80,
+    "attack_vector": "http_scan",
+    "metadata": {"severity": "medium", "sensor": "cowrie"},
+    "payload": "GET /admin"
+  },
+  {
+    "attack_id": "attack-003",
+    "timestamp": "2026-03-30T10:02:00Z",
+    "source_ip": "192.0.2.77",
+    "destination_ip": "10.10.0.5",
+    "destination_port": 5300,
+    "attack_vector": "unknown_probe",
+    "metadata": {"severity": "low", "sensor": "cowrie"},
+    "payload": "random bytes"
+  }
+]

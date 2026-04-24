@@ -1,0 +1,50 @@
+data = pd.read_json("clean_logs.json", lines=True)import pandas as pd
+from sklearn.ensemble import IsolationForest
+
+# قراءة الـ logs
+data = pd.read_json("dahua_logs.json", lines=True)
+
+# تنظيف البيانات
+data = data.dropna(subset=["ip", "username", "password", "command"])
+
+# قائمة أوامر مشبوهة
+suspicious_commands_list = ["rm", "wget", "chmod", "curl", "nc", "bash", "sh"]
+
+# إنشاء عمود يحدد إذا الأمر مشبوه
+data["is_suspicious"] = data["command"].apply(
+    lambda x: any(cmd in str(x) for cmd in suspicious_commands_list)
+)
+
+# استخراج Features لكل IP
+features = data.groupby("ip").agg(
+    total_attempts=("ip", "count"),
+    unique_passwords=("password", "nunique"),
+    suspicious_commands=("is_suspicious", "sum")
+).reset_index()
+
+# تدريب الموديل
+X = features[["total_attempts", "unique_passwords", "suspicious_commands"]]
+
+model = IsolationForest(contamination=0.2, random_state=42)
+model.fit(X)
+
+# التنبؤ
+features["anomaly"] = model.predict(X)
+features["attack"] = features["anomaly"].apply(lambda x: "Attack" if x == -1 else "Normal")
+
+# تحديد مستوى الخطورة
+def classify_severity(row):
+    if row["total_attempts"] > 30 or row["suspicious_commands"] > 3:
+        return "High"
+    elif row["total_attempts"] >= 10:
+        return "Medium"
+    else:
+        return "Low"
+
+features["severity"] = features.apply(classify_severity, axis=1)
+
+# حفظ النتائج
+features.to_json("attack_results.json", orient="records", indent=2)
+
+print("Done. Results saved in attack_results.json")
+print(features)

@@ -1,0 +1,1147 @@
+/* ================================================= */
+/* 1. Root Variables (كاملة كما هي بدون أي تغيير)    */
+/* ================================================= */
+:root {
+  --neon-green: #00ff41;
+  --dark-green: rgba(0, 255, 65, 0.2);
+  --header-bg: rgba(0, 10, 0, 0.85);
+  --alert-red: #ff0000;
+  --bg-dark: #000;
+  --panel-bg: rgba(0, 10, 0, 0.95);
+  --neon-yellow: #ffaa00; 
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg-dark);
+  color: var(--neon-green);
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+  font-size: 14px;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-dark);
+  overflow: hidden;
+  position: relative;
+}
+*{
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ================================================= */
+/* 2. الخريطة (التوسط المطلق مع الأبعاد الجديدة)      */
+/* ================================================= */
+/* موديول الدرع (Shield) */
+/* تأثير التوهج حول الحاوية */
+.globe-wrapper.shield-on {
+  position: relative;
+  transition: all 0.5s ease-in-out;
+}
+
+/* صنع هالة ضوئية (Shield) حول الكرة */
+.globe-wrapper.shield-on img {
+  filter: drop-shadow(0 0 25px rgba(0, 255, 65, 0.8));
+  border-radius: 50%; /* لضمان أن التوهج دائري */
+}
+/* مثال CSS لنمط سداسي بصري */
+.globe-backdrop {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background-color: #000;
+  background-image: 
+    linear-gradient(120deg, rgba(0, 255, 65, 0.1) 25%, transparent 25%),
+    linear-gradient(60deg, rgba(0, 255, 65, 0.1) 25%, transparent 25%);
+  background-size: 50px 87px; /* حجم السداسيات */
+  z-index: -1; /* خلف الكرة */
+}
+/* فيApp.css */
+/* عندما يكون الشيلد مفعلاً */
+
+
+/* طبقة درع متحركة (اختياري لزيادة الواقعية) */
+.shield-layer {
+  position: absolute;
+  top: -5%; left: -5%;
+  width: 110%; height: 110%;
+  border: 2px solid rgba(0, 255, 65, 0.3);
+  border-radius: 50%;
+  box-shadow: inset 0 0 30px rgba(0, 255, 65, 0.2);
+  animation: pulse-shield 2s infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes pulse-shield {
+  from { transform: scale(1); opacity: 0.4; }
+  to { transform: scale(1.05); opacity: 0.7; }
+}
+.globe-shield-effect {
+  position: absolute;
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  border: 4px double var(--neon-green);
+  box-shadow: 0 0 50px var(--neon-green), inset 0 0 30px var(--neon-green);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.5s ease;
+}
+
+/* تفعيل الأنيميشن عند إضافة الكلاس عبر JS */
+.shield-active img.globe-image {
+  filter: drop-shadow(0 0 30px rgba(0, 255, 65, 1)); /* توهج قوي */
+  transition: all 0.5s ease;
+}
+
+.shield-active .globe-backdrop {
+  opacity: 1; /* جعل الخلفية السداسية واضحة ومشرقة */
+}
+
+@keyframes shield-pulse-glow {
+  0% { transform: scale(1); opacity: 0.2; }
+  50% { transform: scale(1.05); opacity: 0.5; }
+  100% { transform: scale(1); opacity: 0.2; }
+}
+.map-wrapper-full {
+  position: fixed;
+  top: 80px; 
+  left: 70px; 
+  width: calc(100vw - 70px);
+  height: calc(100vh - 80px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1;
+  background: radial-gradient(circle, #001a00 0%, #000000 100%);
+  overflow: hidden;
+}
+
+.globe-inner-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+/* ================================================= */
+/* 3. الهيدر (استرجاع كامل تفاصيل الـ Grid والـ After) */
+/* ================================================= */
+.header-pro {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 80px; 
+  display: grid;
+  grid-template-columns: 1.2fr 2fr 1.2fr; 
+  align-items: center;
+  padding: 0 25px;
+  background: var(--header-bg);
+  backdrop-filter: blur(10px); 
+  border-bottom: 1px solid var(--dark-green);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  z-index: 2000;
+  box-sizing: border-box;
+}
+
+.header-pro::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
+  opacity: 0.3;
+}
+
+.main-title h1 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 24px; 
+  letter-spacing: 6px;
+  margin: 0;
+  color: var(--neon-green);
+  text-shadow: 0 0 15px var(--neon-green);
+  font-weight: 300;
+}
+
+.project-id-badge {
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.6;
+  border: 1px solid var(--dark-green);
+  padding: 2px 8px;
+  margin-bottom: 4px;
+  display: inline-block;
+}
+
+.security-specs {
+  font-size: 1rem; 
+  line-height: 1.3;
+  border-right: 2px solid var(--neon-green);
+  padding-right: 12px;
+  margin-right: 12px;
+}
+
+.live-clock {
+  font-size: 1.7rem ; 
+  font-weight: 200;
+  letter-spacing: 2px;
+  color: #fff; 
+  text-shadow: 0 0 5px var(--neon-green);
+}
+
+/* ================================================= */
+/* 4. المنيو الجانبي (تصغير الخط للأيقونات)           */
+/* ================================================= */
+.side-nav-large {
+  position: fixed;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%); 
+  width: 65px; 
+  background: rgba(0, 10, 0, 0.9);
+  border: 1px solid var(--dark-green);
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 200000 !important; 
+  display: flex;
+  flex-direction: column;
+  padding: 12px 0;
+  overflow: hidden;
+  pointer-events: all !important; 
+}
+
+.side-nav-large.hidden-icons {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-100px);
+}
+
+.side-nav-large:hover:not(.hidden-icons) {
+  width: 220px;
+}
+
+.nav-item-container {
+  display: flex;
+  align-items: center; 
+  width: 100%;
+  padding: 15px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+
+.nav-item-container:hover {
+  background: rgba(0, 255, 65, 0.1);
+}
+
+.nav-icon-box {
+  min-width: 40px;
+  height: 40px;
+  background: rgba(0, 40, 0, 0.3);
+  border: 1px solid var(--neon-green);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.3s ease;
+  border-radius: 8px;
+}
+
+.nav-label-text {
+  margin-left: 15px;
+  font-size: 0.85rem; 
+  font-weight: bold;
+  letter-spacing: 1px;
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: all 0.3s ease;
+  color: #fff;
+}
+
+.side-nav-large:hover .nav-label-text {
+  opacity: 1;
+  transform: translateX(0);
+}
+.sidebar-icons {
+  position: fixed; /* لتظل في مكانها مهما حدث في منتصف الشاشة */
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10; /* أقل من الـ config-glass */
+}
+
+/* ================================================= */
+/* 5. بوكس المعلومات (Map Overlay)                   */
+/* ================================================= */
+.node-info-overlay {
+  position: absolute; 
+  width: 300px;
+  background: rgba(0, 5, 0, 0.95);
+  border: 1px solid var(--neon-green);
+  box-shadow: 0 0 30px rgba(0, 255, 65, 0.3);
+  padding: 18px;
+  z-index: 4000;
+  border-left: 5px solid var(--neon-green);
+  animation: slideIn 0.3s ease-out;
+  pointer-events: all;
+}
+
+.node-info-overlay h4 {
+  margin: 0 0 10px 0;
+  border-bottom: 2px solid var(--dark-green);
+  padding-bottom: 6px;
+  letter-spacing: 2px;
+  font-size: 1.1rem;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+
+.close-mini {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--alert-red);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+/* ================================================= */
+/* 6. شاشة الإنذار الكلية (Huge Alert)               */
+/* ================================================= */
+.full-screen-alert {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100vw; height: 100vh;
+  background: rgba(255, 0, 0, 0.15);
+  display: flex; justify-content: center; align-items: center;
+  backdrop-filter: blur(5px);
+  animation: shake 0.1s infinite;
+  z-index: 9999;
+  pointer-events: none; 
+}
+
+.alert-content {
+  text-align: center;
+  pointer-events: all; 
+}
+
+.alert-header, .alert-footer {
+  font-size: 30px; 
+  color: var(--alert-red);
+  font-weight: bold;
+  margin: 10px 0;
+  text-shadow: 0 0 20px var(--alert-red);
+}
+
+.alert-main-box {
+  font-size: 7vw !important; 
+  white-space: nowrap;
+  max-width: 95vw;
+  text-align: center;
+  font-weight: 900;
+  color: white;
+  background: var(--alert-red);
+  padding: 30px 60px;
+  box-shadow: 0 0 100px var(--alert-red);
+  border: 10px solid white;
+}
+
+/* تحريك الخط الواصل بين المهاجم والهدف */
+.attack-line-animation {
+  stroke-dasharray: 10;
+  animation: dash 20s linear infinite;
+}
+
+@keyframes dash {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* ستايل أيقونة المهاجم */
+.attacker-node-icon {
+  background: #ff0000;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 15px #ff0000;
+  width: 12px !important;
+  height: 12px !important;
+}
+
+/* ================================================= */
+/* 7. الحركات (Animations) - مسترجعة سطر بسطر           */
+/* ================================================= */
+@keyframes slideIn { from { transform: translateX(50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes scanline { 0% { bottom: 100%; } 100% { bottom: -100px; } }
+@keyframes shake { 0% { transform: translate(2px, 2px); } 50% { transform: translate(-2px, -2px); } 100% { transform: translate(2px, -2px); } }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+@keyframes load { 0% { width: 0%; } 100% { width: 100%; } }
+@keyframes flash-red { 0%, 100% { opacity: 0; } 50% { opacity: 0.2; } }
+
+.scanline {
+  width: 100%;
+  height: 80px;
+  z-index: 5;
+  background: linear-gradient(0deg, transparent 0%, rgba(0, 255, 65, 0.05) 50%, transparent 100%);
+  position: absolute;
+  bottom: 100%;
+  animation: scanline 10s linear infinite;
+  pointer-events: none;
+}
+
+.bottom-panel {
+  position: fixed;
+  bottom: 25px;
+  right: 25px;
+  background: #000;
+  padding: 10px 20px;
+  font-size: 1rem;
+  cursor: pointer;
+  z-index: 1600;
+  border: 1px solid var(--neon-green);
+  transition: 0.3s;
+}
+
+.bottom-panel:hover {
+  background: var(--neon-green);
+  color: #000;
+}
+
+/* ================================================= */
+/* 8. شاشات التحليل (تعديل الهيكل للسكرول والاحتواء)  */
+/* ================================================= */
+.sub-screen-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%); 
+  width: 90vw;
+  height: 85vh; /* تحديد الارتفاع لمنع خروج الكلام */
+  background: rgba(0, 10, 0, 0.95);
+  border: 2px solid var(--neon-green);
+  box-shadow: 0 0 30px rgba(0, 255, 0, 0.2);
+  z-index: 9999;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column; /* ترتيب العناصر عمودياً */
+  overflow: hidden; 
+  /* --- تعديل بسيط: تشويش الخلفية لمنع الخريطة من الظهور بشكل مشوه تحت النصوص --- */
+  backdrop-filter: blur(15px);
+}
+
+.critical-overlay-inner {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none !important; 
+  z-index: 1;
+}
+
+.screen-header h2 {
+  font-family: 'Orbitron', sans-serif;
+  letter-spacing: 4px;
+  font-size: 2rem; 
+  border-left: 8px solid var(--neon-green);
+  padding-left: 20px;
+  margin-bottom: 25px;
+  position: relative;
+  z-index: 2;
+}
+
+.split-layout {
+  display: flex;
+  gap: 25px;
+  flex: 1;
+  min-height: 0; /* ضروري جداً لعمل السكرول داخل Flex */
+  position: relative;
+  z-index: 2;
+}
+
+.map-panel {
+  flex: 1.4;
+  border: 1px solid var(--dark-green);
+  background: #000;
+  position: relative;
+}
+
+#attacker-dot {
+  position: absolute;
+  width: 14px; height: 14px;
+  background: var(--alert-red);
+  border-radius: 50%;
+  box-shadow: 0 0 20px var(--alert-red);
+  z-index: 100;
+  transition: all 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: pulse-red 1.5s infinite;
+}
+
+#target-dot {
+  position: absolute;
+  width: 12px; height: 12px;
+  background: var(--neon-green);
+  border-radius: 50%;
+  left: 50%; top: 50%;
+  box-shadow: 0 0 15px var(--neon-green);
+}
+
+.data-panel {
+  flex: 1;
+  background: rgba(0, 20, 0, 0.5);
+  border: 1px solid var(--dark-green);
+  padding: 15px;
+  overflow-y: auto; /* تفعيل السكرول عند زيادة البيانات */
+  display: flex;
+  flex-direction: column;
+}
+
+.cyber-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.cyber-table td {
+  padding: 10px 6px; 
+  border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+  font-size: 0.95rem; 
+  word-break: break-all; /* منع خروج الكلام الطويل */
+}
+
+.cyber-table tr td:first-child {
+  color: rgba(0, 255, 65, 0.6);
+  font-weight: bold;
+  width: 40%;
+}
+
+/* ================================================= */
+/* 9. الـ Panels والأزرار الكاملة                    */
+/* ================================================= */
+.half-panel {
+  flex: 1;
+  border: 2px solid var(--neon-green);
+  padding: 18px;
+  background: rgba(0, 30, 0, 0.2);
+  margin-bottom: 10px;
+}
+
+.half-panel.attacker {
+  border-color: var(--alert-red);
+  background: rgba(50, 0, 0, 0.1);
+}
+
+.close-btn-lg {
+  position: absolute;
+  top: 15px;
+  right: 25px;
+  background: rgba(0,0,0,0.8);
+  border: 2px solid var(--neon-green);
+  color: var(--neon-green);
+  font-size: 28px;
+  width: 50px;
+  height: 50px;
+  cursor: pointer !important;
+  z-index: 10050 !important; 
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: all !important;
+}
+
+.action-btn {
+  width: 100%;
+  padding: 14px;
+  font-size: 1.1rem ; 
+  margin-top: 15px;
+  background: transparent;
+  border: 2px solid var(--neon-green);
+  color: var(--neon-green);
+  font-weight: bold;
+  cursor: pointer !important;
+  transition: 0.3s;
+  position: relative;
+  z-index: 10050 !important;
+  pointer-events: all !important;
+  flex-shrink: 0; /* يمنع الزر من الاختفاء */
+}
+
+.action-btn:hover {
+  background: var(--neon-green);
+  color: #000;
+}
+
+/* ================================================= */
+/* 10. تفاصيل الألوان والهستوري                       */
+/* ================================================= */
+.red-txt { color: var(--alert-red) !important; font-weight: bold; }
+.yellow-txt { color: #ffff00 !important; }
+.glitch-red { color: var(--alert-red); text-shadow: 0 0 10px var(--alert-red); }
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto; /* تفعيل السكرول للهستوري */
+}
+
+.history-item {
+  border: 1px solid var(--dark-green);
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  background: rgba(0, 15, 0, 0.6);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.history-item:hover {
+  border-color: var(--neon-green);
+  background: rgba(0, 255, 65, 0.1);
+}
+
+/* ================================================= */
+/* 11. البارات والمخططات كاملة                       */
+/* ================================================= */
+.bar-chart { margin-top: 15px; }
+.bar { margin-bottom: 8px; }
+.bar span { 
+  font-size: 0.85rem; 
+  display: block; 
+  margin-top: 4px; 
+  color: #fff;
+}
+.fill { 
+  height: 10px; 
+  background: var(--neon-green); 
+  transition: 1.2s cubic-bezier(0.1, 0, 0.2, 1); 
+  margin-top: 5px;
+  box-shadow: 0 0 10px var(--dark-green);
+}
+.fill.red { background: var(--alert-red); box-shadow: 0 0 10px var(--alert-red); }
+.fill.green { background: var(--neon-green); }
+
+.pulse { animation: pulse 2s infinite; }
+.blink-red { animation: pulse 0.5s infinite; color: var(--alert-red); font-weight: bold; }
+
+@keyframes pulse-red {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.6; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* تنسيق الهيدر المطور */
+.header-pro-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 90px;
+  background: rgba(0, 0, 0, 0.95);
+  padding: 0 40px;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.3);
+  z-index: 10000;
+  box-sizing: border-box;
+}
+
+.header-section {
+  flex: 1; 
+  display: flex;
+  flex-direction: column;
+}
+
+.header-section.left { align-items: flex-start; }
+.header-section.center { align-items: center; flex: 2; } 
+.header-section.right { align-items: flex-end; flex-direction: row; justify-content: flex-end; gap: 30px; }
+
+.internal-access-tag {
+  font-size: 10px;
+  border: 1px solid #00ff41;
+  padding: 2px 10px;
+  color: #00ff41;
+  letter-spacing: 2px;
+  margin-bottom: 5px;
+}
+
+.glitch-title {
+  font-size: 34px;
+  color: #00ff41;
+  margin: 0;
+  letter-spacing: 6px;
+  text-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+  font-family: 'Orbitron', sans-serif;
+}
+
+.header-underline-glow {
+  width: 200px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00ff41, transparent);
+  margin-top: 8px;
+}
+
+.meta-label { font-size: 10px; color: rgba(0, 255, 65, 0.6); font-family: monospace; }
+.status-secured-badge { color: #00ff41; font-weight: bold; margin-top: 5px; font-family: monospace; font-size: 14px; }
+.status-alert-badge { color: #ff0000; font-weight: bold; margin-top: 5px; font-family: monospace; font-size: 14px; text-shadow: 0 0 10px #ff0000; }
+
+.crypto-details { text-align: right; font-size: 11px; color: #00ff41; line-height: 1.5; font-family: monospace; }
+.highlight-white { color: #fff; font-weight: bold; }
+
+.clock-wrapper { display: flex; align-items: baseline; color: #00ff41; font-family: 'Orbitron', monospace; }
+.live-clock-digits { font-size: 28px; font-weight: bold; }
+.live-clock-ms { font-size: 16px; opacity: 0.7; margin-left: 3px; }
+
+.animate-bar-red {
+  width: 0%;
+  animation: fillRed 2.5s forwards cubic-bezier(0.1, 0.5, 0.5, 1);
+}
+
+.animate-bar-green {
+  width: 0%;
+  animation: fillGreen 1.5s forwards ease-in-out;
+}
+
+@keyframes fillRed {
+  0% { width: 0%; }
+  100% { width: 92%; box-shadow: 0 0 10px #ff0000; }
+}
+
+@keyframes fillGreen {
+  0% { width: 0%; }
+  100% { width: 8%; }
+}
+
+.fill-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.fill-glow::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  animation: scan-glow 2s infinite;
+}
+
+@keyframes scan-glow {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.glitch-active {
+  animation: text-jitter 0.2s infinite;
+}
+
+@keyframes text-jitter {
+  0% { transform: translate(0); }
+  25% { transform: translate(1px, -1px); color: #ff0000; }
+  50% { transform: translate(-1px, 1px); }
+  100% { transform: translate(0); }
+}
+
+.network-grid-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+
+.mini-panel {
+  border: 1px solid var(--neon-green);
+  padding: 15px;
+  background: rgba(0,0,0,0.5);
+}
+
+.flux-wave {
+  animation: wave-move 2s linear infinite;
+  background: linear-gradient(90deg, transparent, var(--neon-green), transparent);
+}
+
+@keyframes wave-move {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.radar-loader {
+  width: 100px;
+  height: 100px;
+  border: 2px solid var(--neon-green);
+  border-radius: 50%;
+  position: relative;
+  margin: 0 auto;
+}
+
+.radar-loader::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 50%;
+  height: 2px;
+  background: var(--neon-green);
+  transform-origin: left;
+  animation: radar-spin 2s linear infinite;
+}
+
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.threat-alert-box {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 0, 0, 0.9);
+  border: 3px solid white;
+  color: white;
+  padding: 20px 40px;
+  text-align: center;
+  z-index: 10030;
+  pointer-events: none; 
+  box-shadow: 0 0 50px rgba(255, 0, 0, 0.8);
+}
+
+/* ================================================= */
+/* 12. موديول نتائج التحليل (إضافة جديدة كاملة)        */
+/* ================================================= */
+.analysis-results-view {
+  height: 100%;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background: rgba(0, 5, 0, 0.9);
+  overflow-y: auto; /* تفعيل السكرول لهذا الموديول */
+}
+
+.analysis-header-main {
+  font-family: 'Orbitron', sans-serif;
+  color: var(--neon-green);
+  font-size: 1.2rem;
+  border-bottom: 2px solid var(--dark-green);
+  padding-bottom: 10px;
+  letter-spacing: 2px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.metric-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 15px;
+  background: rgba(0, 255, 65, 0.05);
+  border-left: 3px solid var(--neon-green);
+  font-family: monospace;
+}
+
+.m-label {
+  color: rgba(0, 255, 65, 0.6);
+  font-size: 0.85rem;
+}
+
+.m-value {
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.analysis-summary-terminal {
+  margin-top: auto;
+  background: rgba(0, 15, 0, 0.8);
+  border: 1px dashed var(--neon-green);
+  padding: 15px;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  max-height: 200px; /* تحديد الارتفاع لمنع خروج الكلام */
+  overflow-y: auto !important; /* تفعيل السكرول للتايم لاين */
+}
+
+.term-line {
+  margin-bottom: 5px;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.1);
+  word-break: break-all;
+}
+
+.radar-container-active {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  gap: 20px;
+}
+
+.scanning-metadata {
+  text-align: center;
+  font-family: monospace;
+}
+
+.pulse-text {
+  animation: pulse 1.5s infinite;
+  color: var(--neon-green);
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+.fade-in {
+  animation: analysisFadeIn 0.8s ease-out forwards;
+}
+
+@keyframes analysisFadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* تخصيص شريط التمرير (Scrollbar) ليناسب التصميم */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 20, 0, 0.5);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--neon-green);
+  border-radius: 5px;
+}
+/* تصميم الحاوية الرئيسية للإعدادات */
+.config-glass {
+  position: fixed; /* ضروري جداً لكي لا تدفع الأيقونات */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999; /* تأكد أنها أعلى من z-index الأيقونات */
+  background: rgba(0, 0, 0, 0.8); /* خلفية شبه شفافة لتغطية ما خلفها */
+}
+
+.config-frame {
+  display: flex;
+  height: 80vh;
+  width: 90vw; /* تم التعديل لتتناسب كنسبة مئوية مع العرض */
+  max-width: 1200px;
+  margin: 0; /* تم إزالة المارجن لأن الفليكس أعلاه سيقوم بالمهمة بنجاح وتوسيط دقيق */
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  background: #000;
+  box-shadow: 0 0 50px rgba(0, 255, 65, 0.05);
+  position: relative;
+  overflow: hidden; /* يمنع خروج محتويات النافذة من الإطار وكسره */
+}
+
+/* القائمة الجانبية داخل الإعدادات */
+.config-sidebar {
+  width: 200px;
+  border-right: 1px solid rgba(0, 255, 65, 0.2);
+  background: rgba(0, 255, 65, 0.02);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tab {
+  padding: 20px;
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.5);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.05);
+  transition: 0.3s;
+}
+
+.sidebar-tab.active {
+  color: #00ff41;
+  background: rgba(0, 255, 65, 0.1);
+  border-left: 3px solid #00ff41;
+}
+
+.config-main-content {
+  flex: 1;
+  padding: 40px;
+  position: relative;
+  overflow-y: auto;
+}
+
+/* تحسين السويتش (Switch) */
+.cyber-switch {
+  position: relative;
+  width: 50px;
+  height: 24px;
+  flex-shrink: 0; /* --- إضافة: تمنع السويتش من التضاؤل وتكسير الواجهة --- */
+}
+
+.cyber-switch input { opacity: 0; width: 0; height: 0; }
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #333;
+  transition: .4s;
+  border: 1px solid #555;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px; width: 16px;
+  left: 3px; bottom: 3px;
+  background-color: #ff4444;
+  transition: .4s;
+}
+
+input:checked + .switch-slider { background-color: rgba(0, 255, 65, 0.1); border-color: #00ff41; }
+input:checked + .switch-slider:before { transform: translateX(26px); background-color: #00ff41; box-shadow: 0 0 10px #00ff41; }
+
+/* أزرار الاختيار المقسمة (Segmented Control) */
+.segmented-control {
+  display: flex;
+  background: #111;
+  border: 1px solid #333;
+  padding: 3px;
+  border-radius: 4px;
+}
+
+.segmented-control button {
+  flex: 1;
+  background: none;
+  border: none;
+  color: #666;
+  padding: 8px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.segmented-control button.active {
+  background: #00ff41;
+  color: #000;
+  font-weight: bold;
+}
+
+/* ================================================= */
+/* 13. إضافات الحماية لمنع الانكماش (ON/OFF Fix)      */
+/* ================================================= */
+/* هذه الأكواد تضمن عدم تغير حجم الأزرار وتكسير الشاشة إذا تغير النص */
+.toggle-btn {
+  min-width: 110px; 
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 15px;
+  cursor: pointer;
+  background: rgba(255,0,0,0.1);
+  border: 1px solid #ff4444;
+  color: #ff4444;
+  font-family: monospace;
+}
+
+.toggle-btn.on {
+  background: rgba(0,255,65,0.1);
+  border-color: #00ff41;
+  color: #00ff41;
+}
+/* حاوية الإعدادات الشفافة */
+.config-glass {
+  position: fixed; 
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.8);
+}
+
+/* الإطار الداخلي للإعدادات */
+.config-frame {
+  display: flex;
+  height: 80vh;
+  width: 90vw;
+  max-width: 1200px;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  background: #000;
+  position: relative;
+  overflow: hidden;
+}
+
+/* القائمة الجانبية داخل الإعدادات */
+.config-sidebar {
+  width: 200px;
+  border-right: 1px solid rgba(0, 255, 65, 0.2);
+  background: rgba(0, 255, 65, 0.02);
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-tab {
+  padding: 20px;
+  font-family: 'Orbitron', monospace;
+  font-size: 11px;
+  color: rgba(0, 255, 65, 0.5);
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0, 255, 65, 0.05);
+  transition: 0.3s;
+}
+
+.sidebar-tab.active {
+  color: #00ff41;
+  background: rgba(0, 255, 65, 0.1);
+  border-left: 3px solid #00ff41;
+}
+
+/* منطقة المحتوى الرئيسي */
+.config-main-content {
+  flex: 1;
+  padding: 40px;
+  overflow-y: auto;
+}
+
+/* منع انكماش أزرار الـ Toggle والسويتشات */
+.cyber-switch {
+  position: relative;
+  width: 50px;
+  height: 24px;
+  flex-shrink: 0; 
+}
+
+.toggle-btn {
+  min-width: 110px; 
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  font-family: monospace;
+}
+.tab-btn {
+  width: 100%; padding: 25px; background: none; border: none;
+  color: rgba(0,255,65,0.4); text-align: left; cursor: pointer;
+  border-left: 4px solid transparent; transition: 0.3s;
+}
+.tab-btn.active {
+  background: rgba(0,255,65,0.1); color: #00ff41; border-left-color: #00ff41;
+}
+.setting-card-pro {
+  border: 1px solid rgba(0,255,65,0.2); padding: 25px; background: rgba(0,0,0,0.3);
+}

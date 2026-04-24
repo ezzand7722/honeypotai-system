@@ -1,0 +1,29 @@
+/* تصفير الإعدادات لضمان مظهر سينمائي كامل الشاشة */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  background-color: #000000; /* خلفية سوداء مطلقة */
+  color-scheme: dark;
+}
+
+html, body, #root {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden; /* يمنع ظهور السكرول بار */
+  background: #000;
+  cursor: crosshair; /* يغير شكل الماوس ليعطي طابع تقني */
+}
+
+/* تحسين شكل النصوص البرمجية */
+::-webkit-scrollbar {
+  display: none; /* إخفاء أي سكرول بار قد يظهر بالخطأ */
+}
+
+::selection {
+  background: #00ff41;
+  color: #000;
+}
