@@ -1,6 +1,6 @@
 import logging
 from uuid import uuid4
-from typing import Optional, Union
+from typing import Optional, Union, Any
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, File, UploadFile, Form
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ from app.config import get_settings
 from app.schemas.event import RawHoneypotRecord
 from app.services.ai_client import submit_batch_for_scoring, submit_for_scoring
 from app.services.honeypot_ingest import normalize_event
-from app.services.log_file_ingest import parse_honeypot_file
+from app.services.log_file_ingest import parse_honeypot_file, _map_to_raw_record
 from app.services.reporting import record_alert
 
 router = APIRouter()
@@ -28,16 +28,21 @@ class FileIngestRequest(BaseModel):
 
 @router.post("/events", status_code=202)
 async def ingest_honeypot_event(
-    payload: RawHoneypotRecord,
+    payload: dict[str, Any],
     background_tasks: BackgroundTasks,
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
 ) -> dict[str, str]:
     if x_shared_secret != settings.honeypot_shared_secret:
         raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
-    event = normalize_event(payload)
+    try:
+        mapped_record = _map_to_raw_record(payload, source_file="api", source_line=0)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid payload format: {e}")
+
+    event = normalize_event(mapped_record)
     logger.info("INGEST single event event_id=%s src=%s vec=%s", event.event_id, event.source_ip, event.attack_vector)
-    raw_payload = payload.model_dump(mode="json")
+    raw_payload = mapped_record.model_dump(mode="json")
     normalized_payload = event.model_dump(mode="json")
     record_alert(event, raw_log=raw_payload, normalized_log=normalized_payload)
     background_tasks.add_task(submit_for_scoring, event, raw_payload)
@@ -47,7 +52,7 @@ async def ingest_honeypot_event(
 
 @router.post("/events/batch", status_code=202)
 async def ingest_honeypot_events_batch(
-    payload: list[RawHoneypotRecord],
+    payload: list[dict[str, Any]],
     background_tasks: BackgroundTasks,
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
     chunk_size: int = Query(25, ge=1, le=500),
@@ -58,9 +63,19 @@ async def ingest_honeypot_events_batch(
     if not payload:
         raise HTTPException(status_code=400, detail="Payload must contain at least one event")
 
+    mapped_records = []
+    for idx, raw in enumerate(payload):
+        try:
+            mapped_records.append(_map_to_raw_record(raw, source_file="api_batch", source_line=idx))
+        except Exception:
+            continue
+
+    if not mapped_records:
+        raise HTTPException(status_code=400, detail="No readable events in payload")
+
     pipeline_id = str(uuid4())
-    events = [normalize_event(item) for item in payload]
-    raw_logs = [item.model_dump(mode="json") for item in payload]
+    events = [normalize_event(item) for item in mapped_records]
+    raw_logs = [item.model_dump(mode="json") for item in mapped_records]
 
     for index, event in enumerate(events):
         record_alert(

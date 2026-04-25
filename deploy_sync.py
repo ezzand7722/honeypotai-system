@@ -25,37 +25,21 @@ def deploy():
         sys.exit(1)
 
     try:
-        print("Opening SFTP session...")
-        sftp = ssh.open_sftp()
-        
-        # Files to sync
-        local_backend_dir = r"g:\college project\proj\backend\app"
-        remote_backend_dir = "/root/honeypotai-system/backend/app"
-        
-        files_to_sync = [
-            ("routers/reporting.py", "routers/reporting.py"),
-            ("services/reporting.py", "services/reporting.py"),
-            ("main.py", "main.py")
-        ]
-        
-        for local_rel, remote_rel in files_to_sync:
-            local_path = os.path.join(local_backend_dir, local_rel).replace('\\', '/')
-            remote_path = f"{remote_backend_dir}/{remote_rel}"
-            print(f"Uploading {local_path} to {remote_path}...")
-            sftp.put(local_path, remote_path)
-        
-        sftp.close()
-        print("All files uploaded successfully.")
-        
+        print("Pulling latest code from GitHub on the Droplet...")
+        stdin, stdout, stderr = ssh.exec_command("cd /root/honeypotai-system && git stash && git pull origin main")
+        git_logs = stdout.read().decode()
+        git_err = stderr.read().decode()
+        print("GIT LOGS:\n" + git_logs)
+        if git_err: print("GIT ERRORS:\n" + git_err)
     except Exception as e:
-        print(f"SFTP Upload failed: {e}")
+        print(f"Git pull failed: {e}")
         ssh.close()
         sys.exit(1)
 
-    print("Restarting processes via bash wrapper...")
-    ssh.exec_command("systemctl restart backend")
-    ssh.exec_command("systemctl restart fastapi")
+    print("Restarting backend service...")
     
+    print("Attempting to restart backend properly...")
+    # Kill the previously backgrounded process
     ssh.exec_command("pkill -f uvicorn")
     import time
     time.sleep(2)
