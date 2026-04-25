@@ -2,8 +2,11 @@ import logging
 from uuid import uuid4
 from typing import Optional, Union
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, File, UploadFile, Form
 from pydantic import BaseModel
+import shutil
+import tempfile
+import os
 
 from app.config import get_settings
 from app.schemas.event import RawHoneypotRecord
@@ -94,22 +97,25 @@ async def ingest_honeypot_events_batch(
 
 @router.post("/events/from-file", status_code=202)
 async def ingest_honeypot_events_from_file(
-    request: FileIngestRequest,
     background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    chunk_size: int = Form(25),
+    max_records: Optional[int] = Form(None),
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
 ) -> dict[str, Union[str, int]]:
     if x_shared_secret != settings.honeypot_shared_secret:
         raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
-    if request.chunk_size < 1 or request.chunk_size > 500:
+    if chunk_size < 1 or chunk_size > 500:
         raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
 
+    file_path = os.path.join(tempfile.gettempdir(), f"{uuid4()}_{file.filename}")
     try:
-        raw_records = parse_honeypot_file(request.file_path, request.max_records)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(status_code=400, detail=f"Unable to read file: {exc}") from exc
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        raw_records = parse_honeypot_file(file_path, max_records)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Unable to process file: {exc}") from exc
 
     if not raw_records:
         raise HTTPException(status_code=400, detail="No valid records found in file")
