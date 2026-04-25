@@ -115,36 +115,89 @@ function App() {
   }, []);
 
   // --- CONNECT TO REAL BACKEND API ---
+  const fetchBackendAlertsRef = useRef(null);
+
   useEffect(() => {
-    const fetchBackendAlerts = async () => {
+    fetchBackendAlertsRef.current = async () => {
       try {
         const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-        const res = await fetch(`${backendUrl}/report/alerts?limit=5`, {
-          headers: { 'X-Shared-Secret': 'default-shared-secret' }
+        // Add cache-busting timestamp so the browser never caches this request
+        const res = await fetch(`${backendUrl}/report/alerts?limit=15&_t=${Date.now()}`, {
+          headers: {
+            'X-Shared-Secret': 'default-shared-secret',
+            'Cache-Control': 'no-store, no-cache, must-revalidate',
+            'Pragma': 'no-cache'
+          }
         });
         if (res.ok) {
           const data = await res.json();
           if (data && data.length > 0) {
-            data.forEach(alert => {
-              setHistoryList(prev => {
-                if (prev.find(a => a.id === alert.event_id)) return prev;
-                const predictionDetails = alert.prediction?.details || {};
-                const at_type = alert.prediction?.details?.attack_type || alert.attack_vector || 'UNKNOWN';
-                const formatted = {
-                  id: alert.event_id,
-                  date: new Date(alert.timestamp).toISOString().replace('T', ' ').split('.')[0],
-                  type: at_type,
-                  ip: alert.source_ip || 'UNKNOWN',
-                  port: 'N/A',
-                  proto: alert.raw_log?.protocol || 'TCP/UDP',
-                  loc: 'Unknown',
-                  threat: alert.prediction ? Math.floor(alert.prediction.risk_score * 100) + '%' : '50%',
-                  coords: { lat: 0, lng: 0 },
-                  status: 'DETECTED',
-                  history: alert.prediction?.summary || 'Attack detected'
-                };
-                return [formatted, ...prev];
+            // We need to safely update state by checking existing history
+            setHistoryList(prev => {
+              let addedNew = false;
+              let detectedNewAttack = null;
+              // Limit the history array size so it doesn't grow infinitely
+              let newHistory = [...prev].slice(0, 50);
+
+              data.forEach(alert => {
+                const eventData = alert.event || alert;
+                const predictionData = alert.prediction || {};
+                const eventId = eventData.event_id || eventData.id || `EV-${Math.floor(Math.random() * 9000) + 1000}`;
+
+                if (!newHistory.find(a => a.id === eventId)) {
+                  let eventDateMs = new Date();
+                  if (eventData.timestamp) {
+                    const parsed = new Date(eventData.timestamp);
+                    if (!isNaN(parsed.getTime())) eventDateMs = parsed;
+                  }
+
+                  const at_type = predictionData.details?.attack_type || eventData.attack_vector || 'UNKNOWN';
+                  const risk = predictionData.risk_score !== undefined ? predictionData.risk_score : (alert.risk_score || 0.5);
+
+                  const formatted = {
+                    id: eventId,
+                    date: eventDateMs.toISOString().replace('T', ' ').split('.')[0],
+                    type: at_type,
+                    ip: eventData.source_ip || 'UNKNOWN',
+                    port: eventData.port || 'N/A',
+                    proto: eventData.raw_log?.protocol || 'TCP/UDP',
+                    loc: 'Unknown',
+                    threat: Math.floor(risk * 100) + '%',
+                    coords: {
+                      lat: (Math.random() * 120 - 60),
+                      lng: (Math.random() * 360 - 180)
+                    },
+                    status: 'DETECTED',
+                    history: predictionData.summary || 'Attack detected',
+                    livePayload: (Math.random() * 500 + 100).toFixed(1) + " MB/s"
+                  };
+
+                  newHistory = [formatted, ...newHistory];
+                  addedNew = true;
+                  if (!detectedNewAttack) detectedNewAttack = formatted;
+                }
               });
+
+              // Apply trigger if new items arrived
+              if (addedNew && detectedNewAttack && !window.isSystemUnderAttack && !settings.shieldActive) {
+                // Dispatch timeout so we don't cause React render conflict while setting another state inside setState
+                setTimeout(() => {
+                  setActiveTestAttack(detectedNewAttack);
+                  setSelectedAttackForDetail(detectedNewAttack);
+                  setActiveAttacks([]);
+                  setDoubleAttackMode(false);
+                  setShowMultiAttackDetail(false);
+                  setAlertSuppressed(false);
+                  setIsAttacked(true);
+                  setShowOverlay(true);
+                  setHeuristicProgress(0);
+                  isFinalizing.current = false;
+                  setCurrentScreen('main');
+                  setLiveLog(`🔴 REAL_ATTACK_DETECTED: ${detectedNewAttack.type}`);
+                }, 0);
+              }
+
+              return newHistory;
             });
           }
         }
@@ -152,9 +205,15 @@ function App() {
         // Backend not reachable, ignore
       }
     };
+  }, [settings.shieldActive]);
 
-    fetchBackendAlerts();
-    const interval = setInterval(fetchBackendAlerts, 4000);
+  useEffect(() => {
+    const fetchWrapper = () => {
+      if (fetchBackendAlertsRef.current) fetchBackendAlertsRef.current();
+    }
+    fetchWrapper();
+    // Decrease interval from 4000 to 1000 for instant feeling
+    const interval = setInterval(fetchWrapper, 1000);
     return () => clearInterval(interval);
   }, []);
 
