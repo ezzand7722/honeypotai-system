@@ -4,6 +4,7 @@ import traceback
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.config import get_settings
 from app.routers import ai_inference, honeypot, reporting
@@ -19,27 +20,6 @@ settings = get_settings()
 def create_app() -> FastAPI:
     app = FastAPI(title="Honeypot AI Security Detection System")
     initialize_database()
-
-    @app.middleware("http")
-    async def catch_all_errors_middleware(request: Request, call_next):
-        """Catch all errors including form parsing errors and return JSON."""
-        try:
-            response = await call_next(request)
-            return response
-        except Exception as exc:
-            error_msg = str(exc)
-            stack_trace = traceback.format_exc()
-            logger.error(f"MIDDLEWARE_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
-            
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "detail": error_msg,
-                    "error_type": type(exc).__name__,
-                    "path": str(request.url.path),
-                    "source": "middleware"
-                }
-            )
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
@@ -81,6 +61,38 @@ def create_app() -> FastAPI:
             content={
                 "detail": exc.detail,
                 "error_type": "HTTPException", 
+                "path": str(request.url.path),
+            }
+        )
+
+    @app.exception_handler(ValidationError)
+    async def validation_error_handler(request: Request, exc: ValidationError):
+        """Handle validation errors and return JSON."""
+        errors = exc.errors()
+        logger.error(f"VALIDATION_ERROR path={request.url.path} errors={errors}")
+        
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "Validation error",
+                "error_type": "ValidationError",
+                "path": str(request.url.path),
+                "errors": errors
+            }
+        )
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        """Catch all unhandled exceptions and return with details."""
+        error_msg = str(exc)
+        stack_trace = traceback.format_exc()
+        logger.error(f"UNHANDLED_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": error_msg,
+                "error_type": type(exc).__name__,
                 "path": str(request.url.path),
             }
         )
