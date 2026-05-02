@@ -7,6 +7,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 from pathlib import Path
+import tempfile
+import platform
+import time
 
 from app.config import get_settings
 from app.schemas.event import AiPrediction, EnrichedEvent
@@ -18,6 +21,10 @@ from app.services.reporting import (
     mark_chunk_failed,
     mark_chunk_sent,
 )
+
+# Windows/Unix specific imports
+if platform.system() != "Windows":
+    import fcntl
 
 settings = get_settings()
 log = logging.getLogger(__name__)
@@ -40,6 +47,29 @@ if os.name == 'nt':
     PYTHON_EXE = os.path.join(AI_SYS_DIR, "venv", "Scripts", "python.exe")
 else:
     PYTHON_EXE = os.path.join(AI_SYS_DIR, "venv", "bin", "python")
+
+def _acquire_lock(lock_file: str, timeout: int = 30) -> bool:
+    """Acquire a file lock with timeout. Works on Windows and Unix."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            # Try to create lock file exclusively (atomic operation)
+            lock_fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(lock_fd)
+            return True
+        except FileExistsError:
+            time.sleep(0.1)  # Wait and retry
+    return False
+
+
+def _release_lock(lock_file: str) -> None:
+    """Release a file lock."""
+    try:
+        if os.path.exists(lock_file):
+            os.remove(lock_file)
+    except Exception as e:
+        log.debug("Failed to remove lock file %s: %s", lock_file, e)
+
 
 def _chunked(items: Sequence, size: int) -> List[Sequence]:
     return [items[i : i + size] for i in range(0, len(items), size)]
@@ -85,21 +115,33 @@ def _confidence_from_severity(sev: str) -> float:
 
 
 async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]:
-    # 1. Append logs to dahua_logs_multi.json
-    try:
-        with open(DAHUA_LOGS, "a", encoding="utf-8") as f:
-            for log_entry in formatted_logs:
-                f.write(json.dumps(log_entry) + "\n")
-    except Exception as e:
-        log.error("Failed to append to %s: %s", DAHUA_LOGS, e)
+    # 1. Append logs to dahua_logs_multi.json with file locking
+    lock_file = os.path.join(AI_SYS_DIR, ".dahua_logs.lock")
+    
+    if _acquire_lock(lock_file, timeout=30):
+        try:
+            with open(DAHUA_LOGS, "a", encoding="utf-8") as f:
+                for log_entry in formatted_logs:
+                    f.write(json.dumps(log_entry) + "\n")
+        except Exception as e:
+            log.error("Failed to append to %s: %s", DAHUA_LOGS, e)
+        finally:
+            _release_lock(lock_file)
+    else:
+        log.warning("Failed to acquire lock for %s", DAHUA_LOGS)
 
-    # 2. Run ai.py
+    # 2. Create unique temp file per instance to run ai.py
+    instance_id = str(uuid4())[:8]
+    temp_results_file = os.path.join(tempfile.gettempdir(), f"attack_results_{instance_id}.json")
+    
     try:
+        # Run ai.py (it reads dahua_logs_multi.json and writes to attack_results.json)
         process = await asyncio.create_subprocess_exec(
             PYTHON_EXE, AI_PY_SCRIPT,
             cwd=AI_SYS_DIR,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "ATTACK_RESULTS_FILE": temp_results_file}
         )
         stdout, stderr = await process.communicate()
         if process.returncode != 0:
@@ -108,18 +150,27 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     except Exception as e:
         log.error("Failed to execute ai.py: %s", e)
 
-    # 3. Read attack_results.json
+    # 3. Read attack_results.json 
     results_by_ip = {}
+    results_file = temp_results_file if os.path.exists(temp_results_file) else ATTACK_RESULTS
+    
     try:
-        if os.path.exists(ATTACK_RESULTS):
-            with open(ATTACK_RESULTS, "r", encoding="utf-8") as f:
+        if os.path.exists(results_file):
+            with open(results_file, "r", encoding="utf-8") as f:
                 content = f.read().strip()
                 if content:
                     results = json.loads(content)
                     for r in results:
                         results_by_ip[r.get("src_ip")] = r
     except Exception as e:
-        log.error("Failed to read %s: %s", ATTACK_RESULTS, e)
+        log.error("Failed to read %s: %s", results_file, e)
+    finally:
+        # Clean up temp file
+        if temp_results_file != ATTACK_RESULTS and os.path.exists(temp_results_file):
+            try:
+                os.remove(temp_results_file)
+            except Exception as e:
+                log.debug("Failed to clean up temp file %s: %s", temp_results_file, e)
 
     return results_by_ip
 

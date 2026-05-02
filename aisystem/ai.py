@@ -1,6 +1,7 @@
 import json
 import pandas as pd
 from sklearn.ensemble import IsolationForest
+import os
 
 # ===== 1) قراءة الملف =====
 rows = []
@@ -150,8 +151,9 @@ features = features[
 ]
 
 # ===== 11) حفظ النتائج =====
-features.to_json("attack_results.json", orient="records", indent=2)
+results_file = os.environ.get("ATTACK_RESULTS_FILE", "attack_results.json")
+features.to_json(results_file, orient="records", indent=2)
 
 print("\n=== DONE ===")
 print(features)
-print("\nSaved to attack_results.json")
+print(f"\nSaved to {results_file}")

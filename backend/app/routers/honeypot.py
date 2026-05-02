@@ -143,7 +143,7 @@ async def ingest_honeypot_events_from_file(
         record_alert(
             event,
             pipeline_id=pipeline_id,
-            chunk_index=index // request.chunk_size,
+            chunk_index=index // chunk_size,
             raw_log=raw_logs[index],
             normalized_log=event.model_dump(mode="json"),
         )
@@ -153,14 +153,14 @@ async def ingest_honeypot_events_from_file(
         events,
         raw_logs,
         pipeline_id,
-        request.chunk_size,
+        chunk_size,
     )
 
-    total_chunks = (len(events) + request.chunk_size - 1) // request.chunk_size
+    total_chunks = (len(events) + chunk_size - 1) // chunk_size
     return {
         "status": "accepted",
         "pipeline_id": pipeline_id,
         "events_received": len(events),
         "chunks_queued": total_chunks,
-        "source_file": request.file_path,
+        "source_file": file_path,
     }
