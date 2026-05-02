@@ -1,8 +1,9 @@
 import logging
+import json
 from uuid import uuid4
 from typing import Optional, Union, Any
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, File, UploadFile, Form
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, File, UploadFile, Form, Request
 from pydantic import BaseModel
 import shutil
 import tempfile
@@ -70,13 +71,45 @@ async def ingest_honeypot_event(
 
 @router.post("/events/batch", status_code=202)
 async def ingest_honeypot_events_batch(
-    payload: list[dict[str, Any]],
+    request: Request,
     background_tasks: BackgroundTasks,
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
     chunk_size: int = Query(25, ge=1, le=500),
 ) -> dict[str, Union[str, int]]:
+    """Accept both JSON array format and JSONL format (one JSON object per line)"""
     if x_shared_secret != settings.honeypot_shared_secret:
         raise HTTPException(status_code=401, detail="Invalid honeypot credential")
+
+    # Parse request body as either JSON array or JSONL
+    try:
+        body = await request.body()
+        body_str = body.decode('utf-8').strip()
+        
+        if not body_str:
+            raise HTTPException(status_code=400, detail="Request body cannot be empty")
+        
+        # Try JSON array format first (starts with '[')
+        if body_str.startswith('['):
+            payload = json.loads(body_str)
+            source_format = "json_array"
+        else:
+            # Parse as JSONL (one JSON object per line)
+            payload = []
+            for line_num, line in enumerate(body_str.split('\n'), 1):
+                line = line.strip()
+                if line:  # Skip empty lines
+                    try:
+                        obj = json.loads(line)
+                        payload.append(obj)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Skipping invalid JSON on line {line_num}: {str(e)}")
+                        continue
+            source_format = "jsonl"
+            
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON format: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error parsing request body: {str(e)}")
 
     if not payload:
         raise HTTPException(status_code=400, detail="Payload must contain at least one event")
@@ -104,10 +137,11 @@ async def ingest_honeypot_events_batch(
             normalized_log=event.model_dump(mode="json"),
         )
     logger.info(
-        "INGEST batch pipeline_id=%s events=%s chunk_size=%s first_event_id=%s",
+        "INGEST batch pipeline_id=%s events=%s chunk_size=%s format=%s first_event_id=%s",
         pipeline_id,
         len(events),
         chunk_size,
+        source_format,
         events[0].event_id if events else None,
     )
 
@@ -125,6 +159,7 @@ async def ingest_honeypot_events_batch(
         "pipeline_id": pipeline_id,
         "events_received": len(events),
         "chunks_queued": total_chunks,
+        "format": source_format,
     }
 
 
