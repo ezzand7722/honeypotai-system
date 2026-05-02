@@ -20,6 +20,24 @@ logger = logging.getLogger("honeypot.ingest")
 settings = get_settings()
 
 
+@router.post("/events/debug-file", status_code=202)
+async def debug_file_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    chunk_size: int = Form(25),
+    max_records: Optional[int] = Form(None),
+    x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
+) -> dict[str, str]:
+    """Debug endpoint to test file upload form parsing."""
+    logger.info("DEBUG_FILE filename=%s chunk_size=%s max_records=%s", file.filename, chunk_size, max_records)
+    return {
+        "status": "received",
+        "filename": file.filename,
+        "chunk_size": str(chunk_size),
+        "max_records": str(max_records) if max_records else "None"
+    }
+
+
 class FileIngestRequest(BaseModel):
     file_path: str
     chunk_size: int = 25

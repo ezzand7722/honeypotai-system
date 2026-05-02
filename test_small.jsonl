@@ -1,0 +1,2 @@
+{"eventid":"cowrie.session.connect","src_ip":"192.168.1.1","src_port":48124,"dst_ip":"127.0.0.1","dst_port":2222,"session":"test1","protocol":"ssh","message":"Test connection","timestamp":"2026-05-02T10:00:00Z"}
+{"eventid":"cowrie.login.success","src_ip":"192.168.1.2","username":"root","password":"test","message":"Login success","timestamp":"2026-05-02T10:01:00Z"}
