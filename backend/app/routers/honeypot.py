@@ -132,7 +132,7 @@ async def ingest_honeypot_events_batch(
 async def ingest_honeypot_events_from_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    chunk_size: int = Form(25),
+    chunk_size: Optional[int] = Form(None),
     max_records: Optional[int] = Form(None),
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
 ) -> dict[str, Union[str, int]]:
@@ -140,7 +140,11 @@ async def ingest_honeypot_events_from_file(
         if x_shared_secret != settings.honeypot_shared_secret:
             raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
-        if chunk_size < 1 or chunk_size > 500:
+        # Use defaults if not provided
+        _chunk_size = chunk_size if chunk_size is not None else 25
+        _max_records = max_records
+        
+        if _chunk_size < 1 or _chunk_size > 500:
             raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
 
         file_path = os.path.join(tempfile.gettempdir(), f"{uuid4()}_{file.filename}")
@@ -155,8 +159,8 @@ async def ingest_honeypot_events_from_file(
             raise HTTPException(status_code=400, detail=f"Failed to save file: {str(e)}")
         
         try:
-            raw_records = parse_honeypot_file(file_path, max_records)
-            logger.info("FILE_PARSED records=%s max=%s", len(raw_records), max_records)
+            raw_records = parse_honeypot_file(file_path, _max_records)
+            logger.info("FILE_PARSED records=%s max=%s", len(raw_records), _max_records)
         except Exception as e:
             logger.error("FILE_PARSE_ERROR error=%s", e, exc_info=True)
             raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
@@ -175,7 +179,7 @@ async def ingest_honeypot_events_from_file(
                     record_alert(
                         event,
                         pipeline_id=pipeline_id,
-                        chunk_index=index // chunk_size,
+                        chunk_index=index // _chunk_size,
                         raw_log=raw_logs[index],
                         normalized_log=event.model_dump(mode="json"),
                     )
@@ -188,10 +192,10 @@ async def ingest_honeypot_events_from_file(
                 events,
                 raw_logs,
                 pipeline_id,
-                chunk_size,
+                _chunk_size,
             )
 
-            total_chunks = (len(events) + chunk_size - 1) // chunk_size
+            total_chunks = (len(events) + _chunk_size - 1) // _chunk_size
             logger.info("FILE_INGEST_SUCCESS pipeline_id=%s events=%s chunks=%s", pipeline_id, len(events), total_chunks)
             return {
                 "status": "accepted",
