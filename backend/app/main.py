@@ -21,6 +21,27 @@ def create_app() -> FastAPI:
     initialize_database()
 
     @app.middleware("http")
+    async def catch_all_errors_middleware(request: Request, call_next):
+        """Catch all errors including form parsing errors and return JSON."""
+        try:
+            response = await call_next(request)
+            return response
+        except Exception as exc:
+            error_msg = str(exc)
+            stack_trace = traceback.format_exc()
+            logger.error(f"MIDDLEWARE_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
+            
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "detail": error_msg,
+                    "error_type": type(exc).__name__,
+                    "path": str(request.url.path),
+                    "source": "middleware"
+                }
+            )
+
+    @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.time()
         response = await call_next(request)
