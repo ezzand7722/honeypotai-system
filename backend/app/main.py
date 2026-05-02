@@ -1,7 +1,9 @@
 import logging
 import time
+import traceback
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers import ai_inference, honeypot, reporting
@@ -31,6 +33,22 @@ def create_app() -> FastAPI:
             duration_ms,
         )
         return response
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        """Catch all unhandled exceptions and return with details."""
+        error_msg = str(exc)
+        stack_trace = traceback.format_exc()
+        logger.error(f"UNHANDLED_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": error_msg,
+                "error_type": type(exc).__name__,
+                "path": str(request.url.path),
+            }
+        )
 
     app.add_middleware(
         CORSMiddleware,
