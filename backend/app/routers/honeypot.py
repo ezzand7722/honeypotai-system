@@ -118,62 +118,77 @@ async def ingest_honeypot_events_from_file(
     max_records: Optional[int] = Form(None),
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
 ) -> dict[str, Union[str, int]]:
-    if x_shared_secret != settings.honeypot_shared_secret:
-        raise HTTPException(status_code=401, detail="Invalid honeypot credential")
-
-    if chunk_size < 1 or chunk_size > 500:
-        raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
-
-    file_path = os.path.join(tempfile.gettempdir(), f"{uuid4()}_{file.filename}")
     try:
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        logger.info("FILE_SAVED path=%s", file_path)
-        raw_records = parse_honeypot_file(file_path, max_records)
-        logger.info("FILE_PARSED records=%s", len(raw_records))
-    except Exception as exc:
-        logger.error("FILE_PROCESSING_ERROR path=%s error=%s", file_path, exc, exc_info=True)
-        raise HTTPException(status_code=400, detail=f"Unable to process file: {exc}") from exc
+        if x_shared_secret != settings.honeypot_shared_secret:
+            raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
-    if not raw_records:
-        raise HTTPException(status_code=400, detail="No valid records found in file")
+        if chunk_size < 1 or chunk_size > 500:
+            raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
 
-    try:
-        pipeline_id = str(uuid4())
-        events = [normalize_event(item) for item in raw_records]
-        logger.info("NORMALIZED_EVENTS count=%s", len(events))
-        raw_logs = [item.model_dump(mode="json") for item in raw_records]
+        file_path = os.path.join(tempfile.gettempdir(), f"{uuid4()}_{file.filename}")
+        logger.info("FILE_UPLOAD_START path=%s filename=%s", file_path, file.filename)
+        
+        try:
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            logger.info("FILE_SAVED path=%s size=%s", file_path, os.path.getsize(file_path))
+        except Exception as e:
+            logger.error("FILE_SAVE_ERROR error=%s", e, exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Failed to save file: {str(e)}")
+        
+        try:
+            raw_records = parse_honeypot_file(file_path, max_records)
+            logger.info("FILE_PARSED records=%s max=%s", len(raw_records), max_records)
+        except Exception as e:
+            logger.error("FILE_PARSE_ERROR error=%s", e, exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
-        for index, event in enumerate(events):
-            try:
-                record_alert(
-                    event,
-                    pipeline_id=pipeline_id,
-                    chunk_index=index // chunk_size,
-                    raw_log=raw_logs[index],
-                    normalized_log=event.model_dump(mode="json"),
-                )
-            except Exception as e:
-                logger.error("RECORD_ALERT_ERROR event_id=%s error=%s", event.event_id, e, exc_info=True)
-                continue
+        if not raw_records:
+            raise HTTPException(status_code=400, detail="No valid records found in file")
 
-        background_tasks.add_task(
-            submit_batch_for_scoring,
-            events,
-            raw_logs,
-            pipeline_id,
-            chunk_size,
-        )
+        try:
+            pipeline_id = str(uuid4())
+            events = [normalize_event(item) for item in raw_records]
+            logger.info("NORMALIZED_EVENTS count=%s", len(events))
+            raw_logs = [item.model_dump(mode="json") for item in raw_records]
 
-        total_chunks = (len(events) + chunk_size - 1) // chunk_size
-        logger.info("FILE_INGEST_SUCCESS pipeline_id=%s events=%s chunks=%s", pipeline_id, len(events), total_chunks)
-        return {
-            "status": "accepted",
-            "pipeline_id": pipeline_id,
-            "events_received": len(events),
-            "chunks_queued": total_chunks,
-            "source_file": file_path,
-        }
-    except Exception as exc:
-        logger.error("FILE_INGEST_FAILED error=%s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Processing error: {exc}") from exc
+            for index, event in enumerate(events):
+                try:
+                    record_alert(
+                        event,
+                        pipeline_id=pipeline_id,
+                        chunk_index=index // chunk_size,
+                        raw_log=raw_logs[index],
+                        normalized_log=event.model_dump(mode="json"),
+                    )
+                except Exception as e:
+                    logger.error("RECORD_ALERT_ERROR event_id=%s error=%s", event.event_id, e)
+                    continue
+
+            background_tasks.add_task(
+                submit_batch_for_scoring,
+                events,
+                raw_logs,
+                pipeline_id,
+                chunk_size,
+            )
+
+            total_chunks = (len(events) + chunk_size - 1) // chunk_size
+            logger.info("FILE_INGEST_SUCCESS pipeline_id=%s events=%s chunks=%s", pipeline_id, len(events), total_chunks)
+            return {
+                "status": "accepted",
+                "pipeline_id": pipeline_id,
+                "events_received": len(events),
+                "chunks_queued": total_chunks,
+                "source_file": file_path,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("PROCESSING_ERROR error=%s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error processing events: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("UNEXPECTED_ERROR error=%s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
