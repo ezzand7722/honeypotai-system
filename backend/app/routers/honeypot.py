@@ -69,7 +69,30 @@ async def ingest_honeypot_event(
     return {"status": "accepted", "event_id": event.event_id}
 
 
-@router.post("/events/batch", status_code=202)
+@router.post(
+    "/events/batch",
+    status_code=202,
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "string",
+                        "description": "Paste JSONL (one JSON object per line) OR a JSON array [ {...}, {...} ]",
+                        "example": '{"eventid":"cowrie.session.connect","src_ip":"1.2.3.4","src_port":1234,"dst_ip":"127.0.0.1","dst_port":2222,"session":"abc123","protocol":"ssh","message":"New connection","sensor":"sensor1","timestamp":"2026-01-01T00:00:00Z"}\n{"eventid":"cowrie.login.success","username":"root","password":"1234","message":"login succeeded","sensor":"sensor1","timestamp":"2026-01-01T00:00:01Z","src_ip":"1.2.3.4","session":"abc123","protocol":"ssh"}',
+                    }
+                },
+                "text/plain": {
+                    "schema": {
+                        "type": "string",
+                        "description": "JSONL format — one JSON object per line",
+                    }
+                },
+            },
+        }
+    },
+)
 async def ingest_honeypot_events_batch(
     request: Request,
     background_tasks: BackgroundTasks,
