@@ -115,7 +115,7 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
     // 1. نضع المهاجم أولاً في المصفوفة ليكون في المقدمة (Z-index أعلى برمجياً في الـ WebGL)
     ...(currentAttacker ? [{ id: 'attacker', lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, label: 'ATTACK_SOURCE', country: currentAttacker.loc.split(',')[1] || 'Unknown', city: currentAttacker.loc.split(',')[0] || 'Unknown', status: 'Threat', color: '#ff0000', ip: currentAttacker.ip, node_id: currentAttacker.id }] : []),
     // 2. نضع العقد الثابتة بعد ذلك
-    { id: 'CAMERA-1', lat: 31.9454, lng: 35.9284, label: 'DAHUA(IPC-HFW1431S)', country: 'Jordan', city: 'Amman', status: 'Active', node_id: 'IPC-HFW1431', ip: '192.168.1.105', color: '#00ff41' }
+    { id: 'CAMERA-1', lat: 31.9454, lng: 35.9284, label: 'DAHUA(IPC-HFW1431S)', country: 'Jordan', city: 'Amman', status: 'Active', node_id: 'IPC-HFW1431', ip: '127.0.0.1', color: '#00ff41' }
   ], [currentAttacker]);
 
   const ringsData = useMemo(() => [

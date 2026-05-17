@@ -34,15 +34,19 @@ const AttackOverlay = ({
   detailAttack,
   onDetailView,
   onCloseOverlay,
+  onHideOverlay,
   toggleAttack, 
   setCurrentScreen,
   alertSuppressed,
-  heuristicProgress
+  heuristicProgress,
+  lastAttackForAlert
 }) => {
   
   const attackToShow = detailAttack || activeTestAttack;
-  const handleMainAlertClick = (alertSuppressed || doubleAttackMode) ? undefined : toggleAttack;
-  const mainAlertIp = activeTestAttack?.ip || (doubleAttackMode && activeAttacks.length > 0 ? activeAttacks[0].ip : "UNKNOWN");
+  // لا نسمح بإيقاف الهجمة من شاشة main للهجمات الفردية
+  const isSingleAttack = activeAttacks.length === 0 && activeTestAttack;
+  const handleMainAlertClick = (alertSuppressed || doubleAttackMode || isSingleAttack) ? undefined : toggleAttack;
+  const mainAlertIp = lastAttackForAlert?.ip || activeTestAttack?.ip || (activeAttacks.length > 0 ? activeAttacks[activeAttacks.length - 1].ip : "UNKNOWN");
 
   // --- حالات البيانات المباشرة (Metrics) ---
   const [liveMetrics, setLiveMetrics] = useState({
@@ -60,11 +64,15 @@ const AttackOverlay = ({
   // وظيفة الإغلاق الصارم: توقف الهجمة، الصوت، وتمنع العودة
   const handleHardClose = (e) => {
     if (e) e.stopPropagation();
-    console.log("System: Manual override - Terminating all attack vectors and audio.");
+    console.log("System: Hiding overlay - Attack continues in background.");
     hasTerminated.current = true; // تفعيل قفل الإنهاء
     
-    // استدعاء وظيفة الإغلاق في App.jsx (التي يجب أن تغلق audio وتضبط isAttacked لـ false)
-    onCloseOverlay(); 
+    // استدعاء وظيفة إخفاء الـ overlay فقط (الهجمة تبقى نشطة)
+    if (onHideOverlay) {
+      onHideOverlay();
+    } else {
+      onCloseOverlay(); // fallback للدالة القديمة إن وجدت
+    }
   };
 
   useEffect(() => {
@@ -114,6 +122,16 @@ const AttackOverlay = ({
       setShowBars(false);
     }
   }, [isAttacked, currentScreen]);
+
+  // الانتقال التلقائي من attack_details إلى attack_summary بعد 10 ثوان
+  useEffect(() => {
+    if (currentScreen === 'attack_details' && isAttacked) {
+      const autoTransitionTimer = setTimeout(() => {
+        setCurrentScreen('attack_summary');
+      }, 10000); // 10 ثوان
+      return () => clearTimeout(autoTransitionTimer);
+    }
+  }, [currentScreen, isAttacked, setCurrentScreen]);
 
   if (!isAttacked) return null;
 
@@ -193,7 +211,37 @@ const AttackOverlay = ({
           }}></div>
           <div className="full-screen-alert" onClick={handleMainAlertClick} style={{ cursor: doubleAttackMode ? 'default' : 'pointer' }}>
             {/* زر الإغلاق X هنا ينهي كل شيء */}
-            <button onClick={handleHardClose} style={{ position: 'absolute', top: '18px', right: '18px', width: '38px', height: '38px', background: 'rgba(0,0,0,0.7)', border: '1px solid #ff4444', color: '#ff4444', fontSize: '24px', cursor: 'pointer', zIndex: 10000 }}>×</button>
+            <button 
+              onClick={handleHardClose} 
+              style={{ 
+                position: 'absolute', 
+                top: '18px', 
+                right: '18px', 
+                width: '48px', 
+                height: '48px', 
+                background: 'rgba(0,0,0,0.8)', 
+                border: '2px solid #ff4444', 
+                color: '#ff4444', 
+                fontSize: '28px', 
+                cursor: 'pointer', 
+                zIndex: 10000,
+                borderRadius: '2px',
+                transition: 'all 0.3s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 0, 0, 0.2)';
+                e.currentTarget.style.boxShadow = '0 0 20px rgba(255, 68, 68, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(0,0,0,0.8)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              ×
+            </button>
             <div className="alert-content">
               <div className="alert-header" style={{ letterSpacing: '5px' }}>
                 {" >>> CRITICAL_SYSTEM_BREACH <<< "}
@@ -213,78 +261,256 @@ const AttackOverlay = ({
       )}
 
       {/* --- الشاشة 2A: لوحة Double Attack المنقسمة --- */}
-      {currentScreen === 'double_attack' && doubleAttackMode && activeAttacks.length === 2 && (
+      {currentScreen === 'double_attack' && (activeAttacks.length >= 2 || (activeTestAttack && activeAttacks.length >= 1)) && (
         <div className="sub-screen-overlay" style={{ overflowY: 'auto', paddingBottom: '40px' }}>
           <button className="close-btn-lg" onClick={handleHardClose}>×</button>
           <div className="screen-header">
             <h2 className="glitch-red" style={{ color: '#ff0000', textAlign: 'center', marginBottom: '30px' }}>
-              {" >>> DUAL VECTOR ANALYSIS <<< "}
+              {` >>> MULTIPLE_VECTOR_ANALYSIS (${(activeTestAttack ? 1 : 0) + activeAttacks.length} ATTACKS) <<< `}
             </h2>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '25px', padding: '20px' }}>
-            {activeAttacks.map((attack, idx) => (
-              <div key={attack.id} style={{ background: 'rgba(0,0,0,0.95)', border: '1px solid rgba(255,0,0,0.35)', padding: '20px', minHeight: '650px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: ((activeTestAttack ? 1 : 0) + activeAttacks.length) > 3 ? 'repeat(2, 1fr)' : '1fr', gap: '25px', padding: '20px' }}>
+            {activeTestAttack && (
+              <div key={activeTestAttack.id} style={{ background: 'rgba(0,0,0,0.95)', border: '1px solid rgba(255,0,0,0.35)', padding: '20px', minHeight: '600px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', alignItems: 'center' }}>
-                  <span style={{ color: '#ff4444', fontWeight: 'bold', letterSpacing: '2px' }}>VECTOR_{idx + 1}</span>
-                  <span style={{ color: '#00ff41', fontSize: '12px', opacity: 0.8 }}>{attack.threat} THREAT</span>
+                  <span style={{ color: '#ff4444', fontWeight: 'bold', letterSpacing: '2px' }}>VECTOR_01</span>
+                  <span style={{ color: '#00ff41', fontSize: '12px', opacity: 0.8 }}>{activeTestAttack.threat} THREAT</span>
                 </div>
 
-                <div style={{ border: '1px solid #ff4444', height: '320px', overflow: 'hidden', marginBottom: '20px' }}>
+                <div style={{ border: '1px solid #ff4444', height: '280px', overflow: 'hidden', marginBottom: '20px' }}>
                   <LiveMap 
-                    key={attack.id} 
+                    key={activeTestAttack.id} 
                     isAttacked={true} 
-                    attackerCoords={attack.coords} 
-                    customWidth={460} 
-                    customHeight={320} 
+                    attackerCoords={activeTestAttack.coords} 
+                    customWidth={((activeTestAttack ? 1 : 0) + activeAttacks.length) > 3 ? 350 : 460} 
+                    customHeight={280} 
                   />
                 </div>
+                {/* --- إضافة عداد مستقل للهجمة الأولى دون حذف المعلومات القديمة --- */}
+<div style={{ 
+  marginBottom: '20px', 
+  background: 'rgba(0,255,65,0.05)', 
+  padding: '12px', 
+  border: '1px solid rgba(0,255,65,0.2)',
+  borderRadius: '4px' 
+}}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#00ff41', marginBottom: '8px', fontFamily: 'monospace', fontWeight: 'bold' }}>
+    <span>[SYSTEM_DEFENSE_STATUS]</span>
+    <span>{(activeTestAttack.progress || 0).toFixed(1)}%</span>
+  </div>
+  <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+    <div style={{ 
+      width: `${activeTestAttack.progress || 0}%`, 
+      height: '100%', 
+      background: 'linear-gradient(90deg, #00ff41, #33ff00)', 
+      boxShadow: '0 0 15px rgba(0, 255, 65, 0.5)',
+      transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)' 
+    }}></div>
+  </div>
+</div>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
                   <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
                     <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>SOURCE_IP</div>
-                    <div style={{ color: '#fff', fontWeight: 'bold' }}>{attack.ip}</div>
+                    <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>{activeTestAttack.ip}</div>
                   </div>
                   <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
                     <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>LOCATION</div>
-                    <div style={{ color: '#fff', fontWeight: 'bold' }}>{attack.loc}</div>
+                    <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>{activeTestAttack.loc}</div>
                   </div>
                   <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
                     <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>PROTOCOL</div>
-                    <div style={{ color: '#fff' }}>{attack.proto}</div>
+                    <div style={{ color: '#fff', fontSize: '12px' }}>{activeTestAttack.proto}</div>
                   </div>
                   <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
                     <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>PAYLOAD</div>
-                    <div style={{ color: '#ff5555', fontWeight: 'bold' }}>{attack.livePayload}</div>
+                    <div style={{ color: '#ff5555', fontWeight: 'bold', fontSize: '12px' }}>{activeTestAttack.livePayload}</div>
                   </div>
                 </div>
 
                 <div style={{ background: 'rgba(255,0,0,0.05)', padding: '15px', border: '1px solid rgba(255,0,0,0.15)', marginBottom: '20px' }}>
                   <div style={{ fontSize: '12px', color: '#00ff41', opacity: 0.8, marginBottom: '10px' }}>ATTACK PROFILE</div>
-                  <div style={{ lineHeight: '1.8', fontSize: '13px', color: '#fff' }}>
+                  <div style={{ lineHeight: '1.6', fontSize: '12px', color: '#fff' }}>
+                    <div><strong>VECTOR:</strong> <span style={{ color: '#ff4444' }}>{activeTestAttack.type}</span></div>
+                    <div><strong>THREAT:</strong> <span style={{ color: '#ff4444' }}>{activeTestAttack.threat}</span></div>
+                    <div><strong>STATUS:</strong> <span style={{ color: '#00ff41' }}>{activeTestAttack.status}</span></div>
+                    <div><strong>ISP:</strong> <span style={{fontSize: '11px'}}>{activeTestAttack.isp || 'Unknown'}</span></div>
+                  </div>
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,0,0,0.15)', fontSize: '11px', color: '#ccc' }}>
+                    <div><strong>CONNECTION_COUNT:</strong> {activeTestAttack.connection_count || 0}</div>
+                    <div><strong>SUCCESS_COUNT:</strong> {activeTestAttack.success_count || 0}</div>
+                    <div><strong>FAILED_COUNT:</strong> {activeTestAttack.failed_count || 0}</div>
+                    <div><strong>UNIQUE_PASSWORDS:</strong> {activeTestAttack.unique_passwords || 0}</div>
+                    <div><strong>COMMAND_COUNT:</strong> {activeTestAttack.command_count || 0}</div>
+                    <div><strong>SUSPICIOUS_COMMANDS:</strong> {activeTestAttack.suspicious_commands || 0}</div>
+                  </div>
+                </div>
+
+                <button 
+                  onClick={() => onDetailView?.(activeTestAttack)}
+                  style={{
+                    width: '100%',
+                    padding: '16px 20px',
+                    minHeight: '50px',
+                    background: '#00ff41',
+                    border: '2px solid #00ff41',
+                    color: '#000',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    letterSpacing: '1px',
+                    fontSize: '14px',
+                    transition: 'all 0.3s ease',
+                    borderRadius: '2px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#33ff00';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 65, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#00ff41';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  OPEN VECTOR_01 DETAILS
+                </button>
+              </div>
+            )}
+            {activeAttacks.map((attack, idx) => (
+              <div key={attack.id} style={{ background: 'rgba(0,0,0,0.95)', border: '1px solid rgba(255,0,0,0.35)', padding: '20px', minHeight: '600px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px', alignItems: 'center' }}>
+                  <span style={{ color: '#ff4444', fontWeight: 'bold', letterSpacing: '2px' }}>VECTOR_{String(idx + 2).padStart(2, '0')}</span>
+                  <span style={{ color: '#00ff41', fontSize: '12px', opacity: 0.8 }}>{attack.threat} THREAT</span>
+                </div>
+
+                <div style={{ border: '1px solid #ff4444', height: '280px', overflow: 'hidden', marginBottom: '20px' }}>
+                  <LiveMap 
+                    key={attack.id} 
+                    isAttacked={true} 
+                    attackerCoords={attack.coords} 
+                    customWidth={((activeTestAttack ? 1 : 0) + activeAttacks.length) > 3 ? 350 : 460} 
+                    customHeight={280} 
+                  />
+                </div>
+                {/* --- إضافة عداد مستقل لكل هجمة في القائمة دون حذف المعلومات القديمة --- */}
+<div style={{ 
+  marginBottom: '20px', 
+  background: 'rgba(0,255,65,0.05)', 
+  padding: '12px', 
+  border: '1px solid rgba(0,255,65,0.2)',
+  borderRadius: '4px' 
+}}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#00ff41', marginBottom: '8px', fontFamily: 'monospace', fontWeight: 'bold' }}>
+    <span>[VECTOR_MITIGATION_LEVEL]</span>
+    <span>{(attack.progress || 0).toFixed(1)}%</span>
+  </div>
+  <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+    <div style={{ 
+      width: `${attack.progress || 0}%`, 
+      height: '100%', 
+      background: 'linear-gradient(90deg, #00ff41, #33ff00)', 
+      boxShadow: '0 0 15px rgba(0, 255, 65, 0.5)',
+      transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)' 
+    }}></div>
+  </div>
+</div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
+                    <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>SOURCE_IP</div>
+                    <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>{attack.ip}</div>
+                  </div>
+                  <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
+                    <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>LOCATION</div>
+                    <div style={{ color: '#fff', fontWeight: 'bold', fontSize: '12px' }}>{attack.loc}</div>
+                  </div>
+                  <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
+                    <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>PROTOCOL</div>
+                    <div style={{ color: '#fff', fontSize: '12px' }}>{attack.proto}</div>
+                  </div>
+                  <div style={{ background: '#070707', padding: '12px', border: '1px solid rgba(255,0,0,0.12)' }}>
+                    <div style={{ opacity: 0.7, fontSize: '11px', color: '#aaa' }}>PAYLOAD</div>
+                    <div style={{ color: '#ff5555', fontWeight: 'bold', fontSize: '12px' }}>{attack.livePayload}</div>
+                  </div>
+                </div>
+
+                <div style={{ background: 'rgba(255,0,0,0.05)', padding: '15px', border: '1px solid rgba(255,0,0,0.15)', marginBottom: '20px' }}>
+                  <div style={{ fontSize: '12px', color: '#00ff41', opacity: 0.8, marginBottom: '10px' }}>ATTACK PROFILE</div>
+                  <div style={{ lineHeight: '1.6', fontSize: '12px', color: '#fff' }}>
                     <div><strong>VECTOR:</strong> <span style={{ color: '#ff4444' }}>{attack.type}</span></div>
                     <div><strong>THREAT:</strong> <span style={{ color: '#ff4444' }}>{attack.threat}</span></div>
                     <div><strong>STATUS:</strong> <span style={{ color: '#00ff41' }}>{attack.status}</span></div>
-                    <div><strong>ISP:</strong> <span>{attack.isp || 'Unknown'}</span></div>
-                    <div><strong>REPUTATION:</strong> <span style={{ color: '#ff4444' }}>{attack.reputation || 'MALICIOUS'}</span></div>
+                    <div><strong>ISP:</strong> <span style={{fontSize: '11px'}}>{attack.isp || 'Unknown'}</span></div>
+                  </div>
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,0,0,0.15)', fontSize: '11px', color: '#ccc' }}>
+                    <div><strong>CONNECTION_COUNT:</strong> {attack.connection_count || 0}</div>
+                    <div><strong>SUCCESS_COUNT:</strong> {attack.success_count || 0}</div>
+                    <div><strong>FAILED_COUNT:</strong> {attack.failed_count || 0}</div>
+                    <div><strong>UNIQUE_PASSWORDS:</strong> {attack.unique_passwords || 0}</div>
+                    <div><strong>COMMAND_COUNT:</strong> {attack.command_count || 0}</div>
+                    <div><strong>SUSPICIOUS_COMMANDS:</strong> {attack.suspicious_commands || 0}</div>
                   </div>
                 </div>
 
                 <button 
                   onClick={() => onDetailView?.(attack)}
                   style={{
-                    width: '100%', padding: '14px', background: '#00ff41', border: '1px solid #00ff41',
-                    color: '#000', fontWeight: 'bold', cursor: 'pointer', letterSpacing: '1px'
+                    width: '100%',
+                    padding: '16px 20px',
+                    minHeight: '50px',
+                    background: '#00ff41',
+                    border: '2px solid #00ff41',
+                    color: '#000',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    letterSpacing: '1px',
+                    fontSize: '14px',
+                    transition: 'all 0.3s ease',
+                    borderRadius: '2px'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#33ff00';
+                    e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 65, 0.4)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#00ff41';
+                    e.currentTarget.style.boxShadow = 'none';
                   }}
                 >
-                  OPEN VECTOR_{idx + 1} DETAILS
+                  OPEN VECTOR_{String(idx + 2).padStart(2, '0')} DETAILS
                 </button>
               </div>
             ))}
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '15px', padding: '0 20px 20px' }}>
-            <button onClick={() => setCurrentScreen('attack_summary')} style={{ padding: '14px 25px', background: 'rgba(0,255,65,0.1)', border: '1px solid #00ff41', color: '#00ff41', fontWeight: 'bold', cursor: 'pointer' }}>
+            <button 
+              onClick={() => setCurrentScreen('attack_summary')} 
+              style={{ 
+                padding: '16px 30px',
+                minHeight: '50px',
+                background: 'rgba(0,255,65,0.12)',
+                border: '2px solid #00ff41',
+                color: '#00ff41',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                letterSpacing: '1px',
+                fontSize: '14px',
+                transition: 'all 0.3s ease',
+                borderRadius: '2px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(0,255,65,0.2)';
+                e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 65, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(0,255,65,0.12)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
               GENERATE INCIDENT SUMMARY
             </button>
           </div>
@@ -298,12 +524,26 @@ const AttackOverlay = ({
           
           <div className="screen-header">
             <h2 className="glitch-red" style={{ color: '#ff0000', textAlign: 'center' }}>
-              {" >>> LIVE BREACH ANALYSIS <<< "}
+              {` >>> LIVE BREACH ANALYSIS (${(activeTestAttack ? 1 : 0) + activeAttacks.length} ACTIVE) <<< `}
             </h2>
           </div>
 
-          {doubleAttackMode && activeAttacks.length === 2 && (
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0 20px 0' }}>
+          {((activeTestAttack && activeAttacks.length >= 1) || activeAttacks.length > 1) && (
+            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0 20px 0', overflowX: 'auto', paddingBottom: '10px' }}>
+              {activeTestAttack && (
+                <button
+                  onClick={() => onDetailView?.(activeTestAttack)}
+                  style={{
+                    padding: '12px 18px',
+                    color: activeTestAttack.id === attackToShow.id ? '#000' : '#fff',
+                    background: activeTestAttack.id === attackToShow.id ? '#00ff41' : 'rgba(255,255,255,0.08)',
+                    border: activeTestAttack.id === attackToShow.id ? '1px solid #00ff41' : '1px solid rgba(255,255,255,0.12)',
+                    cursor: 'pointer', fontWeight: 'bold', letterSpacing: '1px', whiteSpace: 'nowrap'
+                  }}
+                >
+                  VECTOR_01 {activeTestAttack.type.substring(0, 8)}
+                </button>
+              )}
               {activeAttacks.map((attack, idx) => (
                 <button
                   key={attack.id}
@@ -313,26 +553,28 @@ const AttackOverlay = ({
                     color: attack.id === attackToShow.id ? '#000' : '#fff',
                     background: attack.id === attackToShow.id ? '#00ff41' : 'rgba(255,255,255,0.08)',
                     border: attack.id === attackToShow.id ? '1px solid #00ff41' : '1px solid rgba(255,255,255,0.12)',
-                    cursor: 'pointer', fontWeight: 'bold', letterSpacing: '1px'
+                    cursor: 'pointer', fontWeight: 'bold', letterSpacing: '1px', whiteSpace: 'nowrap'
                   }}
                 >
-                  VECTOR_{idx + 1} DETAILS
+                  VECTOR_{String(idx + 2).padStart(2, '0')} {attack.type.substring(0, 8)}
                 </button>
               ))}
-              <button
-                onClick={() => setCurrentScreen('double_attack')}
-                style={{
-                  padding: '12px 18px', color: '#00ff41', background: 'rgba(0,255,65,0.08)',
-                  border: '1px solid #00ff41', cursor: 'pointer', fontWeight: 'bold',
-                  letterSpacing: '1px', marginLeft: 'auto'
-                }}
-              >
-                RETURN TO DUAL DASHBOARD
-              </button>
+              {((activeTestAttack && activeAttacks.length >= 1) || activeAttacks.length > 1) && (
+                <button
+                  onClick={() => setCurrentScreen('double_attack')}
+                  style={{
+                    padding: '12px 18px', color: '#00ff41', background: 'rgba(0,255,65,0.08)',
+                    border: '1px solid #00ff41', cursor: 'pointer', fontWeight: 'bold',
+                    letterSpacing: '1px', marginLeft: 'auto', whiteSpace: 'nowrap'
+                  }}
+                >
+                  MULTI DASHBOARD
+                </button>
+              )}
             </div>
           )}
 
-          <div className="split-layout" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '30px' }}>
+          <div className="split-layout" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '30px', maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div className="map-panel" style={{ border: '1px solid #ff0000', boxShadow: '0 0 15px rgba(255,0,0,0.2)' }}>
               <LiveMap 
                 key={attackToShow.id} 
@@ -343,7 +585,7 @@ const AttackOverlay = ({
               />
             </div>
 
-            <div className="data-panel" style={{ background: 'rgba(20, 0, 0, 0.9)', border: '1px solid #ff0000', padding: '20px' }}>
+            <div className="data-panel" style={{ background: 'rgba(20, 0, 0, 0.9)', border: '1px solid #ff0000', padding: '20px', overflowY: 'auto', maxHeight: '100%' }}>
               <h3 style={{ color: '#ff0000', textTransform: 'uppercase', marginBottom: '20px', borderBottom: '1px solid #ff0000', fontSize: '1.2rem' }}>
                 // THREAT_ACTOR_PROFILE
               </h3>
@@ -351,13 +593,29 @@ const AttackOverlay = ({
               <table className="cyber-table" style={{ width: '100%', color: '#fff' }}>
                 <tbody style={{ fontSize: '16px' }}>
                   <tr><td style={{ padding: '10px 0' }}>EVENT_ID</td><td className="yellow-txt"><Typewriter text={attackToShow.id} /></td></tr>
-                  <tr><td style={{ padding: '10px 0' }}>SOURCE_IP</td><td className="red-txt" style={{ fontWeight: 'bold', fontSize: '18px' }}><Typewriter text={attackToShow.ip} startDelay={500} /></td></tr>
+                  <tr><td style={{ padding: '10px 0' }}>SOURCE_IP (src_ip)</td><td className="red-txt" style={{ fontWeight: 'bold', fontSize: '18px' }}><Typewriter text={attackToShow.ip || attackToShow.src_ip} startDelay={500} /></td></tr>
                   <tr><td style={{ padding: '10px 0' }}>ISP_ORIGIN</td><td><Typewriter text={attackToShow.isp || "Global Telecom"} startDelay={1000} /></td></tr>
                   <tr><td style={{ padding: '10px 0' }}>PROTOCOL</td><td><Typewriter text={`${attackToShow.proto} (PORT: ${attackToShow.port})`} startDelay={1500} /></td></tr>
                   <tr><td style={{ padding: '10px 0' }}>LOCATION</td><td><Typewriter text={attackToShow.loc?.toUpperCase()} startDelay={2000} /></td></tr>
-                  <tr><td style={{ padding: '10px 0' }}>METHOD</td><td style={{ color: '#ffaa00' }}><Typewriter text={attackToShow.type} startDelay={2500} /></td></tr>
+                  <tr><td style={{ padding: '10px 0' }}>ATTACK (attack_type)</td><td style={{ color: '#ffaa00' }}><Typewriter text={attackToShow.type || attackToShow.attack_type} startDelay={2500} /></td></tr>
+                  <tr><td style={{ padding: '10px 0' }}>SEVERITY (severity)</td><td className="red-txt" style={{ fontWeight: 'bold' }}><Typewriter text={attackToShow.threat || attackToShow.severity} startDelay={3000} /></td></tr>
                   <tr><td style={{ padding: '10px 0' }}>LIVE_LOAD</td><td className="red-txt" style={{fontFamily: 'monospace'}}>{liveMetrics.bandwidth}</td></tr>
                   <tr><td style={{ padding: '10px 0' }}>REPUTATION</td><td className="red-txt" style={{ fontWeight: 'bold' }}><Typewriter text={attackToShow.reputation || "MALICIOUS"} startDelay={3000} /></td></tr>
+                </tbody>
+              </table>
+
+              <h3 style={{ color: '#ff0000', marginTop: '20px', borderBottom: '1px solid #ff0000', paddingBottom: '10px', fontSize: '1rem' }}>
+                // ATTACK_STATISTICS
+              </h3>
+              
+              <table className="cyber-table" style={{ width: '100%', color: '#fff', marginTop: '10px' }}>
+                <tbody style={{ fontSize: '14px' }}>
+                  <tr><td style={{ padding: '8px 0' }}>CONNECTION_COUNT</td><td className="yellow-txt" style={{ fontWeight: 'bold' }}>{attackToShow.connection_count || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>SUCCESS_COUNT</td><td style={{ color: '#00ff41' }}>{attackToShow.success_count || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>FAILED_COUNT</td><td className="red-txt">{attackToShow.failed_count || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>UNIQUE_PASSWORDS</td><td style={{ color: '#ffaa00' }}>{attackToShow.unique_passwords || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>COMMAND_COUNT</td><td style={{ color: '#ff6666' }}>{attackToShow.command_count || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>SUSPICIOUS_COMMANDS</td><td className="red-txt" style={{ fontWeight: 'bold' }}>{attackToShow.suspicious_commands || 0}</td></tr>
                 </tbody>
               </table>
 
@@ -449,9 +707,9 @@ const AttackOverlay = ({
             </div>
           </div>
 
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0, 20, 0, 0.9)', border: '1px solid #00ff41', padding: '15px', minHeight: 0 }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0, 20, 0, 0.9)', border: '1px solid #00ff41', padding: '15px', minHeight: 0, overflow: 'hidden' }}>
               <h4 style={{ color: '#00ff41', fontSize: '14px', marginBottom: '10px' }}>DIGITAL_FORENSIC_TIMELINE</h4>
-              <div className="green-scroll" ref={scrollRef}>
+              <div className="green-scroll" ref={scrollRef} style={{ overflowY: 'auto', flex: 1, paddingRight: '10px' }}>
                   <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:22] - INBOUND CONNECTION DETECTED ON PORT ${attackToShow?.port}`} startDelay={1000} /></div>
                   <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:23] - AI SCANNER IDENTIFIED MALICIOUS SIGNATURE: ${attackToShow?.type}`} startDelay={2000} /></div>
                   <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:24] - DEPLOYING VIRTUAL FILE_SYSTEM DECOY" startDelay={3000} /></div>

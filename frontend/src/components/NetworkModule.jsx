@@ -4,27 +4,41 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
   // --- الحالات المحلية للتحكم في العرض الداخلي (بدون حذف) ---
   const [localSelectedAttack, setLocalSelectedAttack] = useState(null);
 
-  // تحديث الهجمة المختارة محلياً عند تغير الهجمات القادمة من الخارج
+  // منطق تحديث ذكي: يحافظ على الهجمة التي اختارها المستخدم يدوياً ويحدث بياناتها فقط
   useEffect(() => {
-    if (activeAttack) {
-      setLocalSelectedAttack(activeAttack);
-    } else if (activeAttacks.length > 0) {
-      setLocalSelectedAttack(activeAttacks[0]);
-    } else {
+    // تجميع كافة الهجمات المتوفرة حالياً
+    const allAttacks = activeAttacks.length > 0 ? activeAttacks : (activeAttack ? [activeAttack] : []);
+    
+    if (allAttacks.length === 0) {
       setLocalSelectedAttack(null);
+      return;
+    }
+
+    // إذا لم يكن هناك هجمة مختارة حالياً، اختر الأولى كافتراضي
+    if (!localSelectedAttack) {
+      setLocalSelectedAttack(allAttacks[0]);
+    } else {
+      // البحث عن الهجمة الحالية في القائمة الجديدة لتحديث بياناتها (مثل التقدم) دون فقدان التركيز
+      const updatedVersion = allAttacks.find(a => a.id === localSelectedAttack.id);
+      
+      if (updatedVersion) {
+        setLocalSelectedAttack(updatedVersion);
+      } else {
+        // إذا اختفت الهجمة التي كان يراقبها المستخدم (انتهت مثلاً)، ننتقل للأولى المتاحة
+        setLocalSelectedAttack(allAttacks[0]);
+      }
     }
   }, [activeAttack, activeAttacks]);
 
   // تحديد الهجوم النشط للعرض وتحليل المنافذ المستهدفة بناءً على الاختيار المحلي
   const displayAttack = localSelectedAttack;
-  const attackPorts = activeAttacks.map(a => a.port?.toString()).filter(Boolean);
 
   // --- الحالات الديناميكية الأصلية بالكامل (بدون أي حذف) ---
   const [nodes, setNodes] = useState([
-    { id: 'DH-CAM-01', ip: '192.168.1.105', status: 'ONLINE', latency: '11ms', cpu: 24, uptime: '12d 4h' },
-    { id: 'DH-CAM-02', ip: '192.168.1.108', status: 'ONLINE', latency: '19ms', cpu: 16, uptime: '05d 1h' },
-    { id: 'HONEY-NODE-X', ip: '192.168.1.200', status: 'ACTIVE', latency: '5ms', cpu: 89, uptime: '48d 12h' },
-    { id: 'GATEWAY-SEC', ip: '192.168.1.1', status: 'SECURED', latency: '2ms', cpu: 12, uptime: '150d 0h' },
+    { id: 'DH-CAM-01', ip: '127.0.0.2', status: 'ONLINE', latency: '11ms', cpu: 24, uptime: '12d 4h' },
+    { id: 'DH-CAM-02', ip: '127.0.0.3', status: 'ONLINE', latency: '19ms', cpu: 16, uptime: '05d 1h' },
+    { id: 'HONEY-NODE-X', ip: '127.0.0.1', status: 'ACTIVE', latency: '5ms', cpu: 89, uptime: '48d 12h' },
+    { id: 'GATEWAY-SEC', ip: '127.0.0.10', status: 'SECURED', latency: '2ms', cpu: 12, uptime: '150d 0h' },
   ]);
 
   const [traffic, setTraffic] = useState({ inbound: 1.3, outbound: 134 });
@@ -96,6 +110,10 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
         @keyframes danger-blink { 0% { opacity: 0; } 50% { opacity: 0.5; } 100% { opacity: 0; } }
         .analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 5px; }
         .analysis-item { border-left: 2px solid #00ff41; padding-left: 8px; font-size: 10px; }
+        
+        aside::-webkit-scrollbar, main::-webkit-scrollbar { width: 6px; }
+        aside::-webkit-scrollbar-track, main::-webkit-scrollbar-track { background: rgba(0, 255, 65, 0.05); }
+        aside::-webkit-scrollbar-thumb, main::-webkit-scrollbar-thumb { background: #00ff41; }
       `}</style>
 
       {/* الهيدر الموحد بالأبعاد الصحيحة */}
@@ -109,27 +127,63 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '40px', flex: 1, minHeight: 0 }}>
         
-        {/* العمود الأيسر: الهجمات النشطة (تظهر دائماً عند وجود أي هجمة) */}
-        <aside style={{ borderRight: '1px solid rgba(0, 255, 65, 0.2)', paddingRight: '20px', display: 'flex', flexDirection: 'column' }}>
+        {/* العمود الأيسر: الهجمات النشطة */}
+        <aside style={{ 
+          borderRight: '1px solid rgba(0, 255, 65, 0.2)', 
+          paddingRight: '20px', 
+          display: 'flex', 
+          flexDirection: 'column',
+          overflowY: 'auto',
+          height: '100%'
+        }}>
           <div style={{ fontSize: '12px', marginBottom: '15px', opacity: 0.5 }}>// ACTIVE_ATTACK_VECTORS</div>
-          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
             {allAvailableAttacks.map((attack, idx) => (
               <div 
-                key={idx} 
+                key={attack.id || idx} 
                 onClick={() => handleAttackClick(attack)} 
                 style={{ 
-                  padding: '18px 20px', marginBottom: '12px', cursor: 'pointer',
-                  border: displayAttack?.id === attack.id ? '2px solid #ff0000' : '1px solid rgba(255,0,0,0.3)',
-                  background: displayAttack?.id === attack.id ? 'rgba(255, 0, 0, 0.15)' : 'transparent',
-                  color: '#fff', fontSize: '16px', fontWeight: '900', transition: '0.2s'
+                  padding: '24px 26px',
+                  marginBottom: '14px',
+                  cursor: 'pointer',
+                  minHeight: '90px',
+                  border: displayAttack?.id === attack.id ? '2px solid #ff0000' : '1px solid rgba(255,0,0,0.4)',
+                  background: displayAttack?.id === attack.id ? 'rgba(255, 0, 0, 0.2)' : 'rgba(255, 0, 0, 0.05)',
+                  color: '#fff',
+                  fontSize: '18px',
+                  fontWeight: '900',
+                  transition: 'all 0.3s ease',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  borderRadius: '2px',
+                  boxShadow: displayAttack?.id === attack.id ? '0 0 25px rgba(255,0,0,0.4)' : '0 0 8px rgba(255,0,0,0.1)'
+                }}
+                onMouseEnter={(e) => {
+                  if (displayAttack?.id !== attack.id) {
+                    e.currentTarget.style.background = 'rgba(255, 0, 0, 0.15)';
+                    e.currentTarget.style.boxShadow = '0 0 15px rgba(255,0,0,0.25)';
+                    e.currentTarget.style.borderColor = '#ff6666';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (displayAttack?.id !== attack.id) {
+                    e.currentTarget.style.background = 'rgba(255, 0, 0, 0.05)';
+                    e.currentTarget.style.boxShadow = '0 0 8px rgba(255,0,0,0.1)';
+                    e.currentTarget.style.borderColor = 'rgba(255,0,0,0.4)';
+                  }
                 }}
               >
-                {displayAttack?.id === attack.id ? `> ${attack.id}` : attack.id}
-                <div style={{ color: displayAttack?.id === attack.id ? '#fff' : '#ff4444', fontSize: '10px', marginTop: '4px' }}>{attack.threat}</div>
+                <div style={{ fontSize: '16px', marginBottom: '8px', letterSpacing: '1px' }}>
+                  {displayAttack?.id === attack.id ? `► ${attack.id}` : attack.id}
+                </div>
+                <div style={{ color: displayAttack?.id === attack.id ? '#ffcccc' : '#ff7777', fontSize: '12px', marginTop: '4px' }}>
+                  {attack.type} • {attack.threat || `${Math.floor(attack.progress || 0)}%`}
+                </div>
               </div>
             ))}
             {allAvailableAttacks.length === 0 && (
-                <div style={{ fontSize: '11px', opacity: 0.3, textAlign: 'center', marginTop: '20px' }}>NO_ACTIVE_THREATS</div>
+                <div style={{ fontSize: '12px', opacity: 0.3, textAlign: 'center', marginTop: '25px', padding: '20px' }}>NO_ACTIVE_THREATS</div>
             )}
           </div>
         </aside>
@@ -137,7 +191,6 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
         {/* المحتوى الرئيسي */}
         <main style={{ overflowY: 'auto', paddingRight: '15px', display: 'flex', flexDirection: 'column', gap: '25px' }}>
           
-          {/* جدول الأجهزة - تفصيل أصلي بالكامل */}
           <section>
             <h3 style={{ fontSize: '14px', marginBottom: '15px', opacity: 0.7 }}>// LIVE_NODE_INVENTORY</h3>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
@@ -175,10 +228,8 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
             </table>
           </section>
 
-          {/* المنطقة السفلية: توزيع ثلاثي (Traffic + Analysis + Ports) */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
             
-            {/* 1. محاكي الترافيك اللحظي */}
             <div style={{ border: `1px solid ${displayAttack ? '#ff0000' : '#00ff41'}`, padding: '20px', background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <h4 style={{ fontSize: '12px', margin: '0 0 10px 0' }}>TRAFFIC_FLUX</h4>
                 <div style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between' }}>
@@ -194,7 +245,6 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
                 </div>
             </div>
 
-            {/* 2. DEEP_PACKET_ANALYSIS */}
             <div style={{ 
               background: 'rgba(0,10,0,0.9)', padding: '20px', 
               border: `1px solid ${displayAttack ? '#ff0000' : 'rgba(0,255,65,0.2)'}`, 
@@ -224,7 +274,6 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
               )}
             </div>
 
-            {/* 3. DECOY_SERVICE_STATUS - يتأثر بالهجمة المختارة من القائمة اليسرى */}
             <div style={{ border: `1px solid ${displayAttack ? '#ff0000' : '#ffaa00'}`, padding: '20px', background: 'rgba(0,0,0,0.5)' }}>
               <h4 style={{ fontSize: '12px', margin: '0 0 10px 0', color: '#ffaa00' }}>DECOY_SERVICE_STATUS</h4>
               <div style={{ fontSize: '11px' }}>
@@ -239,15 +288,14 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
                   if (displayAttack) {
                     const attackPort = displayAttack.port;
                     const attackType = displayAttack.type?.toUpperCase() || '';
-                    
-                    // الفحص يعتمد على الهجمة النشطة المختارة حالياً في القائمة اليسرى
                     isUnderAttack = (
-                      attackPort === 'ALL' ||
-                      attackPort === port.p ||
+                      attackPort === 'ALL' || 
+                      (Array.isArray(attackPort) && attackPort.map(String).includes(port.p)) ||
+                      (typeof attackPort === 'string' && attackPort.split(',').map(s => s.trim()).includes(port.p)) ||
+                      (attackPort?.toString() === port.p) ||
                       attackType.includes(port.n)
                     );
                   }
-                  
                   return (
                     <div key={port.p} style={{display: 'flex', justifyContent: 'space-between', marginBottom: '6px'}}>
                       <span style={{ color: isUnderAttack ? '#ff0000' : 'inherit' }}>PORT {port.p}:</span>
@@ -257,9 +305,6 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
                     </div>
                   );
                 })}
-              </div>
-              <div style={{ marginTop: '10px', borderTop: '1px dashed #ffaa00', paddingTop: '5px', textAlign: 'center', color: displayAttack ? '#ff0000' : '#ffaa00', fontSize: '10px' }}>
-                THREAT_LEVEL: {displayAttack ? 'CRITICAL [9.8/10]' : 'MODERATE [3.2/10]'}
               </div>
             </div>
 
