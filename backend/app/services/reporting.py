@@ -115,16 +115,17 @@ def pipeline_status(pipeline_id: str) -> Optional[Dict[str, Any]]:
 
 
 def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
-    """Return alerts from the in-memory store in a flat format for the frontend."""
+    """Return alerts aggregated by (src_ip, attack_type) so multiple logs
+    from the same attacker doing the same attack = 1 card."""
     with _lock:
-        snapshot = list(_store)[:limit]
+        snapshot = list(_store)
 
-    results = []
+    # Group by (src_ip, attack_type)
+    groups: Dict[str, Dict[str, Any]] = {}
     for record in snapshot:
         event = record["event"]
         prediction = record.get("prediction")
 
-        # Build attack_type from prediction labels or event attack_vector
         attack_type = event.attack_vector or "Unknown"
         severity = event.severity or "high"
         if prediction:
@@ -135,19 +136,44 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
             if prediction.severity:
                 severity = prediction.severity
 
-        results.append({
-            "id": event.event_id,
-            "timestamp": event.first_seen.timestamp(),
-            "attack_type": attack_type,
-            "src_ip": str(event.source_ip),
-            "dest_port": event.destination_port,
-            "protocol": "TCP",
-            "severity": severity,
-            "details": {
-                "event": event.model_dump(mode="json"),
-                "prediction": prediction.model_dump(mode="json") if prediction else None,
-                "received_at": record["received_at"].isoformat(),
-                "pipeline_id": record.get("pipeline_id"),
+        src_ip = str(event.source_ip)
+        group_key = f"{src_ip}|{attack_type}"
+
+        if group_key not in groups:
+            groups[group_key] = {
+                "id": f"AGG-{src_ip}-{attack_type}",
+                "first_seen": event.first_seen.timestamp(),
+                "last_seen": event.first_seen.timestamp(),
+                "attack_type": attack_type,
+                "src_ip": src_ip,
+                "dest_port": event.destination_port,
+                "protocol": "TCP",
+                "severity": severity,
+                "instance_count": 0,
+                "details": {
+                    "event": event.model_dump(mode="json"),
+                    "prediction": prediction.model_dump(mode="json") if prediction else None,
+                    "received_at": record["received_at"].isoformat(),
+                    "pipeline_id": record.get("pipeline_id"),
+                }
             }
-        })
-    return results
+
+        group = groups[group_key]
+        group["instance_count"] += 1
+        ts = event.first_seen.timestamp()
+        if ts < group["first_seen"]:
+            group["first_seen"] = ts
+        if ts > group["last_seen"]:
+            group["last_seen"] = ts
+        # Keep the most recent prediction details
+        if prediction and record.get("prediction"):
+            group["details"]["prediction"] = prediction.model_dump(mode="json")
+
+    # Convert to list, use last_seen as timestamp, sort newest first
+    results = []
+    for group in groups.values():
+        group["timestamp"] = group["last_seen"]
+        results.append(group)
+
+    results.sort(key=lambda x: x["timestamp"], reverse=True)
+    return results[:limit]

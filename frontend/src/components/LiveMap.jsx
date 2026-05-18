@@ -1,5 +1,31 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, Component } from 'react';
 import Globe from 'react-globe.gl';
+
+// Error boundary to catch WebGL/three.js crashes and show fallback instead of white screen
+class GlobeErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  componentDidCatch(error, info) {
+    console.error('Globe render error:', error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#00ff41', fontFamily: 'monospace', fontSize: '14px', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ fontSize: '24px' }}>⚠</div>
+          <div>GLOBE_RENDERER_OFFLINE</div>
+          <div style={{ opacity: 0.5, fontSize: '11px' }}>WebGL context unavailable</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function LiveMap({ isAttacked, attackerData, attackerCoords, targetCoords, hideAttacker, customWidth, customHeight, onNodeClick, shieldActive }) {
   const globeRef = useRef();
@@ -131,6 +157,7 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
       <div className="grid-overlay" style={{ position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none' }} />
 
       <div style={{ position: 'relative', zIndex: 2 }}>
+        <GlobeErrorBoundary>
         <Globe
           ref={globeRef}
           backgroundColor="rgba(0,0,0,0)"
@@ -150,10 +177,6 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
           ringColor={d => t => `rgba(${d.color === '#ff0000' ? '255,0,0' : '0,255,65'},${1-t})`}
           ringMaxRadius={5}
           ringPropagationSpeed={3}
-          labelsData={nodes}
-          labelColor={d => d.color}
-          labelSize={1.5}
-          labelAltitude={0.05}
           arcsData={currentAttacker ? [{ 
               startLat: currentAttacker.coords.lat, startLng: currentAttacker.coords.lng, 
               endLat: currentTarget.lat, endLng: currentTarget.lng, color: '#ff0000' 
@@ -170,6 +193,7 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
           width={customWidth || window.innerWidth}
           height={customHeight || window.innerHeight}
         />
+        </GlobeErrorBoundary>
       </div>
 
       {/* نافذة واحدة فقط تجمع كل التفاصيل */}
