@@ -35,6 +35,7 @@ cd /root/honeypotai-system/backend
 if [ -d "venv" ]; then
     source venv/bin/activate
 fi
+pip install psutil --quiet
 nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > server.log 2>&1 &
 
 echo "=== Waiting for server to start ==="
