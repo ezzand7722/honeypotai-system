@@ -42,6 +42,7 @@ function App() {
   const [heuristicProgress, setHeuristicProgress] = useState(0);
   const [historyList, setHistoryList] = useState(initialHistoryData);
   const [liveLog, setLiveLog] = useState("SYSTEM_IDLE");
+  const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "↓ 0.0 KB/s | ↑ 0.0 KB/s" });
 
   const [showLoopbackMenu, setShowLoopbackMenu] = useState(false);
   const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // لتتبع آخر هجمة للإنذار
@@ -217,6 +218,27 @@ function App() {
     };
   }, [isAttacked, addToHistory]);
 
+  // --- CONNECT TO SYSTEM STATS API ---
+  useEffect(() => {
+    const fetchSystemStats = async () => {
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        const res = await fetch(`${backendUrl}/system/stats`);
+        if (res.ok) {
+          const data = await res.json();
+          setServerStats({ cpu: data.cpu, ram: data.ram, network: data.network });
+          setSelectedNode(prev => (prev && !prev.isAttacker) ? { ...prev, cpu: data.cpu, ram: data.ram, network: data.network } : prev);
+        }
+      } catch (err) {
+        // Silent catch
+      }
+    };
+    
+    fetchSystemStats();
+    const interval = setInterval(fetchSystemStats, 2000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const fetchWrapper = () => {
       if (fetchBackendAlertsRef.current) fetchBackendAlertsRef.current();
@@ -247,7 +269,6 @@ function App() {
         if (selectedNode && !selectedNode.isAttacker) {
           setSelectedNode(prev => prev ? ({
             ...prev,
-            cpu: (Math.random() * 20 + 75).toFixed(1) + "%",
             latency: Math.floor(Math.random() * 150 + 200) + "ms"
           }) : null);
         }
@@ -731,8 +752,9 @@ function App() {
           ...node,
           isAttacker: false,
           title: `NODE_${node.node_id || "UX-99"}`,
-          cpu: (Math.random() * (isAttacked ? 40 : 15) + (isAttacked ? 55 : 5)).toFixed(1) + "%",
-          ram: (Math.random() * 4 + 2).toFixed(1) + " GB / 8GB",
+          cpu: serverStats.cpu,
+          ram: serverStats.ram,
+          network: serverStats.network,
           os: "IOT-Kernel v4.2-Hardened",
           latency: Math.floor(Math.random() * 50 + (isAttacked ? 150 : 10)) + "ms",
           uptime: "12d 04h 22m",
@@ -787,6 +809,7 @@ function App() {
                     <>
                       <div className="info-row"><span>OS_SYS:</span> <span className="val">{selectedNode.os}</span></div>
                       <div className="info-row"><span>IP_ADDR:</span> <span className="val-green">{selectedNode.ip || "10.0.0.105"}</span></div>
+                      <div className="info-row"><span>NET_I/O:</span> <span className="val-yellow">{selectedNode.network}</span></div>
                       <div className="info-row"><span>LATENCY:</span> <span className={isAttacked ? "val-red" : "val-yellow"}>{selectedNode.latency}</span></div>
                       <div className="info-row"><span>STATUS:</span> <span className={isAttacked ? "val-red pulse" : "val-green"}>{selectedNode.security_score}</span></div>
                       <div className="info-row"><span>CPU_LOAD:</span>
