@@ -114,39 +114,40 @@ def pipeline_status(pipeline_id: str) -> Optional[Dict[str, Any]]:
         return dict(pipeline)
 
 
-import json
-from pathlib import Path
-from dateutil import parser as date_parser
-
 def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
-    results_path = Path("/root/honeypotai-system/aisystem/attack_results.json")
-    if not results_path.exists():
-        # Fallback to local windows path for testing
-        results_path = Path(r"g:\college project\proj\aisystem\attack_results.json")
-    if not results_path.exists():
-        return []
+    """Return alerts from the in-memory store in a flat format for the frontend."""
+    with _lock:
+        snapshot = list(_store)[:limit]
 
-    try:
-        with open(results_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            
-        alerts = []
-        for item in data[:limit]:
-            try:
-                dt = date_parser.parse(item.get("last_seen", ""))
-                timestamp = dt.timestamp()
-            except Exception:
-                timestamp = datetime.utcnow().timestamp()
+    results = []
+    for record in snapshot:
+        event = record["event"]
+        prediction = record.get("prediction")
 
-            alerts.append({
-                "id": f"AI-{item.get('src_ip')}-{int(timestamp)}",
-                "timestamp": timestamp,
-                "attack_type": item.get("attack_type", "Unknown"),
-                "src_ip": item.get("src_ip", "Unknown"),
-                "dest_port": 0,
-                "protocol": "TCP",
-                "details": item
-            })
-        return alerts
-    except Exception as e:
-        return []
+        # Build attack_type from prediction labels or event attack_vector
+        attack_type = event.attack_vector or "Unknown"
+        severity = event.severity or "high"
+        if prediction:
+            if prediction.attack_type:
+                attack_type = prediction.attack_type
+            elif prediction.labels:
+                attack_type = prediction.labels[0]
+            if prediction.severity:
+                severity = prediction.severity
+
+        results.append({
+            "id": event.event_id,
+            "timestamp": event.first_seen.timestamp(),
+            "attack_type": attack_type,
+            "src_ip": str(event.source_ip),
+            "dest_port": event.destination_port,
+            "protocol": "TCP",
+            "severity": severity,
+            "details": {
+                "event": event.model_dump(mode="json"),
+                "prediction": prediction.model_dump(mode="json") if prediction else None,
+                "received_at": record["received_at"].isoformat(),
+                "pipeline_id": record.get("pipeline_id"),
+            }
+        })
+    return results
