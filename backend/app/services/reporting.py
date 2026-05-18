@@ -119,7 +119,10 @@ from pathlib import Path
 from dateutil import parser as date_parser
 
 def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
-    results_path = Path(r"g:\college project\proj\aisystem\attack_results.json")
+    results_path = Path("/root/honeypotai-system/aisystem/attack_results.json")
+    if not results_path.exists():
+        # Fallback to local windows path for testing
+        results_path = Path(r"g:\college project\proj\aisystem\attack_results.json")
     if not results_path.exists():
         return []
 
