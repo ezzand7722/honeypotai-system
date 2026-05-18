@@ -114,17 +114,36 @@ def pipeline_status(pipeline_id: str) -> Optional[Dict[str, Any]]:
         return dict(pipeline)
 
 
-def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
-    with _lock:
-        snapshot = list(_store)[:limit]
+import json
+from pathlib import Path
+from dateutil import parser as date_parser
 
-    return [
-        {
-            "event": record["event"].model_dump(mode="json"),
-            "prediction": record["prediction"].model_dump(mode="json") if record["prediction"] else None,
-            "received_at": record["received_at"].isoformat(),
-            "pipeline_id": record.get("pipeline_id"),
-            "chunk_index": record.get("chunk_index"),
-        }
-        for record in snapshot
-    ]
+def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
+    results_path = Path(r"g:\college project\proj\aisystem\attack_results.json")
+    if not results_path.exists():
+        return []
+
+    try:
+        with open(results_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        alerts = []
+        for item in data[:limit]:
+            try:
+                dt = date_parser.parse(item.get("last_seen", ""))
+                timestamp = dt.timestamp()
+            except Exception:
+                timestamp = datetime.utcnow().timestamp()
+
+            alerts.append({
+                "id": f"AI-{item.get('src_ip')}-{int(timestamp)}",
+                "timestamp": timestamp,
+                "attack_type": item.get("attack_type", "Unknown"),
+                "src_ip": item.get("src_ip", "Unknown"),
+                "dest_port": 0,
+                "protocol": "TCP",
+                "details": item
+            })
+        return alerts
+    except Exception as e:
+        return []

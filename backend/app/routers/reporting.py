@@ -6,8 +6,8 @@ router = APIRouter()
 
 
 @router.get("/alerts")
-async def alerts(limit: int = Query(20, ge=1, le=200)) -> list[dict]:
-    return recent_alerts(limit)
+async def alerts(limit: int = Query(20, ge=1, le=200)) -> dict:
+    return {"status": "success", "alerts": recent_alerts(limit)}
 
 
 @router.get("/pipelines/{pipeline_id}")
