@@ -149,16 +149,19 @@ function App() {
         if (!res.ok) return;
         const data = await res.json();
         
-        if (data.status === "success" && data.alerts && data.alerts.length > 0) {
-          // On first poll, silently record existing IDs without triggering any alarms
-          if (isFirstPoll.current) {
+        // Always mark first poll as done, even if backend is empty
+        if (isFirstPoll.current) {
+          isFirstPoll.current = false;
+          if (data.status === "success" && data.alerts && data.alerts.length > 0) {
             data.alerts.forEach(alert => {
               const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
               seenAlertIds.current.add(alertId);
             });
-            isFirstPoll.current = false;
-            return; // Exit silently — site opens clean
           }
+          return; // Exit silently — site opens clean
+        }
+
+        if (data.status === "success" && data.alerts && data.alerts.length > 0) {
 
           data.alerts.forEach(alert => {
             const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
