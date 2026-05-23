@@ -193,8 +193,9 @@ function App() {
           Array.isArray(data?.alerts) &&
           data.alerts.some(a => {
             const ra = a?.details?.received_at;
-            const ms = ra ? Date.parse(ra) : NaN;
-            return Number.isFinite(ms) && (nowMs - ms) <= 90_000;
+            const utcRa = ra ? (ra.endsWith('Z') ? ra : ra + 'Z') : '';
+            const ms = utcRa ? Date.parse(utcRa) : NaN;
+            return Number.isFinite(ms) && Math.abs(nowMs - ms) <= 90_000;
           });
 
         if (data.status === "success" && data.alerts && data.alerts.length > 0) {
@@ -202,7 +203,8 @@ function App() {
             const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
 
             const receivedAtIso = alert?.details?.received_at;
-            const receivedAtMs = receivedAtIso ? Date.parse(receivedAtIso) : NaN;
+            const utcRa = receivedAtIso ? (receivedAtIso.endsWith('Z') ? receivedAtIso : receivedAtIso + 'Z') : '';
+            const receivedAtMs = utcRa ? Date.parse(utcRa) : NaN;
             const lastSeenSeconds = Number(alert.last_seen ?? alert.timestamp ?? alert.first_seen ?? 0) || 0;
             const instanceCount = Number(alert.instance_count ?? 0) || 0;
 
@@ -273,10 +275,12 @@ function App() {
               eventTimeline: timeline
             };
             
-            const isRecent = Number.isFinite(receivedAtMs) && (nowMs - receivedAtMs) <= 60_000;
+            const isRecent = Number.isFinite(receivedAtMs) && Math.abs(nowMs - receivedAtMs) <= 90_000;
             
-            if (!isRecent) {
-                if (initialPoll) addToHistory({ ...mappedAttack, status: 'MITIGATED' });
+            // Only suppress parsing into Active Attacks if it's the very first page load AND the attack is old.
+            // But we always allow it to be pushed if we are live testing (polling)!
+            if (initialPoll && !isRecent) {
+                addToHistory({ ...mappedAttack, status: 'MITIGATED' });
                 return;
             }
 
