@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import LiveMap from './LiveMap';
 
-const HistoryModule = ({ historyList }) => {
+const HistoryModule = ({ historyList, onClearHistory }) => {
   const [selectedHistory, setSelectedHistory] = useState(null);
 
   const titleText = selectedHistory 
@@ -75,7 +75,42 @@ const HistoryModule = ({ historyList }) => {
           </div>
         </div>
 
-        {selectedHistory && <span className="blink-red" style={{ fontSize: '18px' }}>!! SECURE_LOG_ACCESS !!</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {!selectedHistory && (
+            <button
+              onClick={() => {
+                if (typeof onClearHistory === 'function') onClearHistory();
+              }}
+              style={{
+                padding: '10px 14px',
+                background: 'transparent',
+                border: '2px solid #00ff41',
+                color: '#00ff41',
+                fontWeight: '900',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                transition: 'all 0.2s ease',
+                fontSize: '12px',
+                borderRadius: '2px',
+                minHeight: '38px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#00ff41';
+                e.currentTarget.style.color = '#000';
+                e.currentTarget.style.boxShadow = '0 0 18px rgba(0, 255, 65, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = '#00ff41';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              CLEAR_HISTORY
+            </button>
+          )}
+
+          {selectedHistory && <span className="blink-red" style={{ fontSize: '18px' }}>!! SECURE_LOG_ACCESS !!</span>}
+        </div>
       </div>
 
       <div className="history-content-wrapper" style={{ 

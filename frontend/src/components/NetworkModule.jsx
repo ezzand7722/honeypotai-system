@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => {
+const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serverStats }) => {
   // --- الحالات المحلية للتحكم في العرض الداخلي (بدون حذف) ---
   const [localSelectedAttack, setLocalSelectedAttack] = useState(null);
 
@@ -41,7 +41,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
     { id: 'GATEWAY-SEC', ip: '127.0.0.10', status: 'SECURED', latency: '2ms', cpu: 12, uptime: '150d 0h' },
   ]);
 
-  const [traffic, setTraffic] = useState({ inbound: 1.3, outbound: 134 });
+  const [traffic, setTraffic] = useState({ inbound: '0 KB/s', outbound: '0 KB/s' });
   const [packetCount, setPacketCount] = useState(1024);
   const [analysisProgress, setAnalysisProgress] = useState(0);
 
@@ -58,10 +58,18 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
         };
       }));
 
-      setTraffic({
-        inbound: displayAttack ? (6.4 + Math.random() * 2).toFixed(1) : (1.3 + Math.random() * 0.4).toFixed(1),
-        outbound: displayAttack ? Math.floor(950 + Math.random() * 400) : 134
-      });
+      if (serverStats?.network) {
+        const parts = serverStats.network.split('|');
+        setTraffic({
+          inbound: parts[0]?.replace('↓', '').trim() || '0 KB/s',
+          outbound: parts[1]?.replace('↑', '').trim() || '0 KB/s'
+        });
+      } else {
+        setTraffic({
+          inbound: (1.3 + Math.random() * 0.4).toFixed(1) + ' GB/s',
+          outbound: 134 + ' GB/s'
+        });
+      }
 
       setPacketCount(prev => prev + (displayAttack ? Math.floor(Math.random() * 2000) : Math.floor(Math.random() * 100)));
       
@@ -73,7 +81,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
     }, 800);
 
     return () => clearInterval(interval);
-  }, [displayAttack]);
+  }, [displayAttack, serverStats]);
 
   // دالة التعامل مع النقر على الهجمة في القائمة اليسرى لتغيير العرض فقط
   const handleAttackClick = (attack) => {
@@ -233,7 +241,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack }) => 
             <div style={{ border: `1px solid ${displayAttack ? '#ff0000' : '#00ff41'}`, padding: '20px', background: 'rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
                 <h4 style={{ fontSize: '12px', margin: '0 0 10px 0' }}>TRAFFIC_FLUX</h4>
                 <div style={{ fontSize: '10px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>INBOUND: <b className={displayAttack ? 'blink-red' : ''}>{traffic.inbound} GB/s</b></span>
+                  <span>NET_I/O: <b className={displayAttack ? 'blink-red' : ''}>↓ {traffic.inbound} | ↑ {traffic.outbound}</b></span>
                 </div>
                 <div style={{ height: '60px', background: 'rgba(0,0,0,0.5)', marginTop: '10px', overflow: 'hidden', position: 'relative' }}>
                     <div className="flux-wave" style={{ position: 'absolute', width: '100%', height: '3px', top: '50%' }}></div>

@@ -1,7 +1,9 @@
 from collections import deque
 from datetime import datetime
 from threading import Lock
-from typing import Any, Deque, Dict, Optional
+from typing import Any, Deque, Dict, Optional, Union
+
+from pydantic import IPvAnyAddress
 
 from app.schemas.event import AiPrediction, EnrichedEvent
 from app.services.persistence import persist_ai_result, persist_ingested_event
@@ -125,6 +127,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
     for record in snapshot:
         event = record["event"]
         prediction = record.get("prediction")
+        received_at: datetime = record.get("received_at") or datetime.utcnow()
 
         attack_type = event.attack_vector or "Unknown"
         severity = event.severity or "high"
@@ -144,6 +147,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 "id": f"AGG-{src_ip}-{attack_type}",
                 "first_seen": event.first_seen.timestamp(),
                 "last_seen": event.first_seen.timestamp(),
+                "last_received_at": received_at,
                 "attack_type": attack_type,
                 "src_ip": src_ip,
                 "dest_port": event.destination_port,
@@ -153,13 +157,22 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 "details": {
                     "event": event.model_dump(mode="json"),
                     "prediction": prediction.model_dump(mode="json") if prediction else None,
-                    "received_at": record["received_at"].isoformat(),
+                    "received_at": received_at.isoformat(),
                     "pipeline_id": record.get("pipeline_id"),
                 }
             }
 
         group = groups[group_key]
         group["instance_count"] += 1
+        # Track newest ingestion timestamp for replay visibility / sorting
+        if received_at > group.get("last_received_at", received_at):
+            group["last_received_at"] = received_at
+            group["details"]["received_at"] = received_at.isoformat()
+            group["details"]["pipeline_id"] = record.get("pipeline_id")
+            # Keep the most recently ingested raw event/prediction for context
+            group["details"]["event"] = event.model_dump(mode="json")
+            group["details"]["prediction"] = prediction.model_dump(mode="json") if prediction else group["details"].get("prediction")
+
         ts = event.first_seen.timestamp()
         if ts < group["first_seen"]:
             group["first_seen"] = ts
@@ -169,11 +182,124 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
         if prediction and record.get("prediction"):
             group["details"]["prediction"] = prediction.model_dump(mode="json")
 
-    # Convert to list, use last_seen as timestamp, sort newest first
+    # Convert to list, use ingestion time as timestamp, sort newest first
     results = []
     for group in groups.values():
-        group["timestamp"] = group["last_seen"]
+        last_received_at = group.get("last_received_at")
+        group["ingested_at"] = last_received_at.timestamp() if isinstance(last_received_at, datetime) else None
+        group["timestamp"] = group["ingested_at"] or group["last_seen"]
+        group.pop("last_received_at", None)
         results.append(group)
 
     results.sort(key=lambda x: x["timestamp"], reverse=True)
     return results[:limit]
+
+
+def attacker_stats(src_ip: Union[str, IPvAnyAddress]) -> Dict[str, Any]:
+    """Compute attacker statistics from ingested honeypot logs.
+
+    This is a fallback when the AI prediction payload does not provide
+    counts like connection_count/success_count/etc.
+    """
+    src_ip_str = str(src_ip)
+
+    with _lock:
+        snapshot = list(_store)
+
+    connection_count = 0
+    success_count = 0
+    failed_count = 0
+    unique_passwords: set[str] = set()
+    command_count = 0
+    suspicious_commands = 0
+
+    # Detect whether AI is providing these fields for this attacker.
+    ai_fields_seen = {
+        "connection_count": False,
+        "success_count": False,
+        "failed_count": False,
+        "unique_passwords": False,
+        "command_count": False,
+        "suspicious_commands": False,
+    }
+
+    suspicious_markers = (
+        "wget ",
+        "curl ",
+        "chmod ",
+        "chown ",
+        "nc ",
+        "ncat ",
+        "netcat ",
+        "bash ",
+        "sh ",
+        "python ",
+        "perl ",
+        "mkfifo ",
+        "/dev/tcp",
+        "tftp ",
+        "ftp ",
+        "powershell ",
+        "certutil ",
+    )
+
+    for record in snapshot:
+        event = record.get("event")
+        if not event:
+            continue
+
+        if str(event.source_ip) != src_ip_str:
+            continue
+
+        connection_count += 1
+
+        raw = {}
+        try:
+            raw = dict(event.metadata) if event.metadata else {}
+        except Exception:
+            raw = {}
+
+        eventid = str(raw.get("eventid") or raw.get("attack_vector") or event.attack_vector or "")
+        eventid_lower = eventid.lower()
+
+        if "login.success" in eventid_lower:
+            success_count += 1
+            pw = raw.get("password")
+            if pw is not None:
+                unique_passwords.add(str(pw))
+        elif "login.failed" in eventid_lower or "login.failure" in eventid_lower:
+            failed_count += 1
+            pw = raw.get("password")
+            if pw is not None:
+                unique_passwords.add(str(pw))
+
+        if "command.input" in eventid_lower or raw.get("input") is not None:
+            cmd = raw.get("input") or raw.get("message") or ""
+            cmd_str = str(cmd)
+            if cmd_str:
+                command_count += 1
+                cmd_l = cmd_str.lower()
+                if any(m in cmd_l for m in suspicious_markers):
+                    suspicious_commands += 1
+
+        prediction = record.get("prediction")
+        if prediction is not None:
+            # Mark presence of AI-provided fields if they are set.
+            for key in ai_fields_seen.keys():
+                if getattr(prediction, key, None) is not None:
+                    ai_fields_seen[key] = True
+
+    return {
+        "connection_count": connection_count,
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "unique_passwords": len(unique_passwords),
+        "command_count": command_count,
+        "suspicious_commands": suspicious_commands,
+        "ai_provided_any": any(ai_fields_seen.values()),
+        "ai_fields_seen": ai_fields_seen,
+        "window": {
+            "max_history": MAX_HISTORY,
+            "events_considered": connection_count,
+        },
+    }

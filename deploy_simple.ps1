@@ -40,6 +40,6 @@ echo "Deployment completed!"
 "@
 
 Write-Host "Executing deployment commands..."
-echo $deploy_cmds | ssh -i $key_path $user@$host_ip "bash"
+echo $deploy_cmds | ssh -i $key_path -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PubkeyAuthentication=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 $user@$host_ip "bash"
 
 Write-Host "Done!"

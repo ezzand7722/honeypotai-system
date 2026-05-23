@@ -132,13 +132,90 @@ function App() {
 
   // --- CONNECT TO REAL BACKEND API ---
   const fetchBackendAlertsRef = useRef(null);
-  const seenAlertIds = useRef(new Set());
+  const seenAlertToken = useRef(new Map());
   const isFirstPoll = useRef(true); // First poll is silent — just records existing IDs
+  const alertsFetchInFlight = useRef(false);
+  const debugRef = useRef({ lastOkAt: null, lastError: null, lastStatus: null, lastBackendUrl: null, lastAlertsCount: null });
+  const loggedBackendConfigRef = useRef(false);
+  const attackerStatsCacheRef = useRef(new Map()); // src_ip -> stats
+
+  const isRecentAlert = useCallback((alert, nowMs, windowMs = 90_000) => {
+    const ra = alert?.details?.received_at || alert?.last_received_at || alert?.received_at;
+    const ms = ra ? Date.parse(ra) : NaN;
+    return Number.isFinite(ms) && (nowMs - ms) <= windowMs;
+  }, []);
+
+  const extractStatsFromPrediction = useCallback((prediction, fallbackInstanceCount = 0) => {
+    const pred = prediction || {};
+    const stats = {
+      connection_count: pred.connection_count ?? null,
+      success_count: pred.success_count ?? null,
+      failed_count: pred.failed_count ?? null,
+      unique_passwords: pred.unique_passwords ?? null,
+      command_count: pred.command_count ?? null,
+      suspicious_commands: pred.suspicious_commands ?? null,
+      stats_source: 'ai',
+    };
+
+    const hasAny = Object.values(stats).some(v => typeof v === 'number');
+    if (hasAny) {
+      // Prefer AI value when present; fallback to instance_count for connection_count.
+      if (stats.connection_count == null && Number.isFinite(fallbackInstanceCount)) {
+        stats.connection_count = fallbackInstanceCount;
+      }
+      return stats;
+    }
+
+    // No AI stats present.
+    return {
+      connection_count: Number.isFinite(fallbackInstanceCount) ? fallbackInstanceCount : 0,
+      success_count: null,
+      failed_count: null,
+      unique_passwords: null,
+      command_count: null,
+      suspicious_commands: null,
+      stats_source: 'missing_ai',
+    };
+  }, []);
+
+  const fetchAttackerStats = useCallback(async (srcIp) => {
+    if (!srcIp) return null;
+    if (attackerStatsCacheRef.current.has(srcIp)) return attackerStatsCacheRef.current.get(srcIp);
+
+    try {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+      const res = await fetch(`${backendUrl}/report/attacker-stats?src_ip=${encodeURIComponent(srcIp)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const stats = data?.stats;
+      if (!stats) return null;
+      attackerStatsCacheRef.current.set(srcIp, stats);
+
+      // If AI isn't providing these stats, surface that once in console.
+      if (stats?.ai_provided_any === false) {
+        console.warn('[honeypot] AI prediction did not include attack stats fields; using computed stats from ingested logs for', srcIp);
+      }
+      return stats;
+    } catch {
+      return null;
+    }
+  }, []);
 
   useEffect(() => {
     fetchBackendAlertsRef.current = async () => {
+      if (alertsFetchInFlight.current) return;
+      alertsFetchInFlight.current = true;
       try {
         const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        debugRef.current.lastBackendUrl = backendUrl;
+        if (!loggedBackendConfigRef.current) {
+          loggedBackendConfigRef.current = true;
+          try {
+            window.__honeypotDebug = window.__honeypotDebug || {};
+            window.__honeypotDebug.backendUrl = backendUrl;
+          } catch (e) { }
+          console.info('[honeypot] backendUrl =', backendUrl);
+        }
         const res = await fetch(`${backendUrl}/report/alerts?limit=15&_t=${Date.now()}`, {
           headers: {
             'X-Shared-Secret': 'default-shared-secret',
@@ -146,35 +223,90 @@ function App() {
             'Pragma': 'no-cache'
           }
         });
-        if (!res.ok) return;
+        debugRef.current.lastStatus = res.status;
+        if (!res.ok) {
+          const msg = `[honeypot] alerts fetch failed status=${res.status}`;
+          debugRef.current.lastError = msg;
+          try {
+            window.__honeypotDebug = window.__honeypotDebug || {};
+            window.__honeypotDebug.alertsLastError = msg;
+            window.__honeypotDebug.alertsLastStatus = res.status;
+          } catch (e) { }
+          console.warn(msg);
+          return;
+        }
         const data = await res.json();
+        debugRef.current.lastOkAt = Date.now();
+        debugRef.current.lastAlertsCount = Array.isArray(data?.alerts) ? data.alerts.length : null;
+        try {
+          window.__honeypotDebug = window.__honeypotDebug || {};
+          window.__honeypotDebug.alertsLastOkAt = debugRef.current.lastOkAt;
+          window.__honeypotDebug.alertsLastCount = debugRef.current.lastAlertsCount;
+          window.__honeypotDebug.alertsSample = Array.isArray(data?.alerts) ? data.alerts.slice(0, 3) : data;
+          window.__honeypotDebug.alertsLastError = null;
+        } catch (e) { }
         
-        // Always mark first poll as done, even if backend is empty
-        if (isFirstPoll.current) {
-          isFirstPoll.current = false;
-          if (data.status === "success" && data.alerts && data.alerts.length > 0) {
-            data.alerts.forEach(alert => {
-              const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
-              seenAlertIds.current.add(alertId);
-            });
-          }
-          return; // Exit silently — site opens clean
+        const initialPoll = isFirstPoll.current;
+        if (isFirstPoll.current) isFirstPoll.current = false;
+
+        const nowMs = Date.now();
+        const shouldShowOverlayOnInitial =
+          initialPoll &&
+          Array.isArray(data?.alerts) &&
+          data.alerts.some(a => isRecentAlert(a, nowMs, 90_000));
+
+        const alertsArray = Array.isArray(data?.alerts) ? data.alerts : [];
+        const eligibleAlerts = initialPoll
+          ? (shouldShowOverlayOnInitial ? alertsArray.filter(a => isRecentAlert(a, nowMs, 90_000)) : [])
+          : alertsArray;
+
+        // IMPORTANT: Don't mark the UI as attacked on initial load just because
+        // the backend still has old/stale alerts in memory.
+        if (initialPoll && !shouldShowOverlayOnInitial) {
+          eligibleAlerts.forEach(alert => {
+            const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
+            const receivedAtIso = alert?.details?.received_at;
+            const receivedAtMs = receivedAtIso ? Date.parse(receivedAtIso) : NaN;
+            const instanceCount = Number(alert.instance_count ?? 0) || 0;
+            const token = String(Number.isFinite(receivedAtMs) ? receivedAtMs : (receivedAtIso || '')) + '|' + String(instanceCount);
+            seenAlertToken.current.set(alertId, token);
+          });
+          return;
         }
 
-        if (data.status === "success" && data.alerts && data.alerts.length > 0) {
-
-          data.alerts.forEach(alert => {
+        if (data.status === "success" && eligibleAlerts.length > 0) {
+          eligibleAlerts.forEach(alert => {
             const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
-            
-            // Skip if we already processed this exact alert
-            if (seenAlertIds.current.has(alertId)) return;
-            seenAlertIds.current.add(alertId);
+
+            const receivedAtIso = alert?.details?.received_at;
+            const receivedAtMs = receivedAtIso ? Date.parse(receivedAtIso) : NaN;
+            const lastSeenSeconds = Number(alert.last_seen ?? alert.timestamp ?? alert.first_seen ?? 0) || 0;
+            const instanceCount = Number(alert.instance_count ?? 0) || 0;
+
+            const prediction = alert?.details?.prediction || null;
+            const aiStats = extractStatsFromPrediction(prediction, instanceCount);
+
+            // Token changes when the backend ingests new events for the same AGG id
+            const token = String(
+              Number.isFinite(receivedAtMs)
+                ? receivedAtMs
+                : (receivedAtIso || '')
+            ) + '|' + String(instanceCount);
+            const prevToken = seenAlertToken.current.get(alertId);
+
+            // Skip duplicates after initial load
+            if (!initialPoll && prevToken === token) return;
+            seenAlertToken.current.set(alertId, token);
+
+            const dateStr = Number.isFinite(receivedAtMs)
+              ? new Date(receivedAtMs).toISOString().replace('T', ' ').split('.')[0]
+              : (alert.timestamp
+                ? new Date(alert.timestamp * 1000).toISOString().replace('T', ' ').split('.')[0]
+                : new Date().toISOString().replace('T', ' ').split('.')[0]);
 
             const mappedAttack = {
               id: alertId,
-              date: alert.timestamp
-                ? new Date(alert.timestamp * 1000).toISOString().replace('T', ' ').split('.')[0]
-                : new Date().toISOString().replace('T', ' ').split('.')[0],
+              date: dateStr,
               type: alert.attack_type || 'UNKNOWN',
               attack: alert.attack_type || 'UNKNOWN',
               attack_type: alert.attack_type || 'UNKNOWN',
@@ -197,26 +329,64 @@ function App() {
               reputation: 'MALICIOUS',
               livePayload: 'Backend Log',
               detail: JSON.stringify(alert.details || {}),
+              last_seen: lastSeenSeconds,
+              received_at: receivedAtIso || null,
+              instance_count: instanceCount,
+              connection_count: aiStats.connection_count,
+              success_count: aiStats.success_count,
+              failed_count: aiStats.failed_count,
+              unique_passwords: aiStats.unique_passwords,
+              command_count: aiStats.command_count,
+              suspicious_commands: aiStats.suspicious_commands,
+              stats_source: aiStats.stats_source,
               startTime: Date.now(),
               duration: 60000 + Math.random() * 30000,
               progress: 0
             };
             
-            setActiveAttacks(prev => [
-              {...mappedAttack, timestamp: new Date().toLocaleTimeString()},
-              ...prev
-            ]);
-            addToHistory(mappedAttack);
+            setActiveAttacks(prev => {
+              const next = prev.filter(a => a.id !== mappedAttack.id);
+              return [{ ...mappedAttack, timestamp: new Date().toLocaleTimeString() }, ...next];
+            });
+            if (!initialPoll) addToHistory(mappedAttack);
             setActiveTestAttack(mappedAttack);
             setLastAttackForAlert(mappedAttack);
-            if (!isAttacked) {
-              setIsAttacked(true);
-              setShowOverlay(true);
+            if (!isAttacked) setIsAttacked(true);
+
+            // Make new backend alerts visible immediately.
+            if (!initialPoll || shouldShowOverlayOnInitial) setShowOverlay(true);
+
+            // If AI did not supply stats, fetch computed stats once per attacker IP.
+            if (mappedAttack?.src_ip && mappedAttack.stats_source !== 'ai') {
+              const srcIp = mappedAttack.src_ip;
+              fetchAttackerStats(srcIp).then((stats) => {
+                if (!stats) return;
+                const patch = {
+                  connection_count: stats.connection_count,
+                  success_count: stats.success_count,
+                  failed_count: stats.failed_count,
+                  unique_passwords: stats.unique_passwords,
+                  command_count: stats.command_count,
+                  suspicious_commands: stats.suspicious_commands,
+                  stats_source: 'computed_logs',
+                };
+                setActiveTestAttack(prev => (prev && prev.src_ip === srcIp) ? { ...prev, ...patch } : prev);
+                setActiveAttacks(prev => prev.map(a => (a?.src_ip === srcIp) ? { ...a, ...patch } : a));
+                setHistoryList(prev => prev.map(h => (h?.src_ip === srcIp || h?.ip === srcIp) ? { ...h, ...patch } : h));
+              });
             }
           });
         }
       } catch (err) {
-        // Silent catch
+        const msg = `[honeypot] alerts fetch exception: ${err?.message || String(err)}`;
+        debugRef.current.lastError = msg;
+        try {
+          window.__honeypotDebug = window.__honeypotDebug || {};
+          window.__honeypotDebug.alertsLastError = msg;
+        } catch (e) { }
+        console.warn(msg);
+      } finally {
+        alertsFetchInFlight.current = false;
       }
     };
   }, [isAttacked, addToHistory]);
@@ -247,7 +417,8 @@ function App() {
       if (fetchBackendAlertsRef.current) fetchBackendAlertsRef.current();
     }
     fetchWrapper();
-    const interval = setInterval(fetchWrapper, 1000);
+    // Faster polling so replayed logs show up quickly.
+    const interval = setInterval(fetchWrapper, 250);
     return () => clearInterval(interval);
   }, []);
 
@@ -376,7 +547,7 @@ function App() {
     setCurrentScreen('main');
     setActiveModule(null);
     alertShownForAttackIds.current.clear(); // مسح سجل الإنذارات
-    seenAlertIds.current.clear(); // Allow backend attacks to re-appear after mitigation
+    seenAlertToken.current.clear(); // Allow backend attacks to re-appear after mitigation
 
     setTimeout(() => { isFinalizing.current = false; }, 500);
   }, [activeAttacks, activeTestAttack, addToHistory, doubleAttackMode]);
@@ -817,8 +988,8 @@ function App() {
                       <div className="info-row"><span>STATUS:</span> <span className={isAttacked ? "val-red pulse" : "val-green"}>{selectedNode.security_score}</span></div>
                       <div className="info-row"><span>CPU_LOAD:</span>
                         <div className="mini-bar">
-                          <div className={`fill fill-glow ${isAttacked ? 'animate-bar-red' : ''}`}
-                            style={{ width: selectedNode.cpu, background: isAttacked ? '#ff0000' : '#00ff41' }}></div>
+                          <div className="fill fill-glow"
+                            style={{ width: selectedNode.cpu, background: isAttacked ? '#ff0000' : '#00ff41', boxShadow: isAttacked ? '0 0 10px #ff0000' : 'none' }}></div>
                         </div>
                       </div>
                     </>
@@ -885,14 +1056,14 @@ function App() {
           {activeModule === 'network' && (
             <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
               <button className="close-btn-lg" onClick={() => setActiveModule(null)}>×</button>
-              <NetworkModule activeAttack={activeTestAttack} activeAttacks={activeAttacks} onSelectAttack={openAttackDetail} />
+              <NetworkModule activeAttack={activeTestAttack} activeAttacks={activeAttacks} onSelectAttack={openAttackDetail} serverStats={serverStats} />
             </div>
           )}
 
           {activeModule === 'history' && (
             <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all', background: '#020b02' }}>
               <button className="close-btn-lg" onClick={() => setActiveModule(null)}>×</button>
-              <HistoryModule historyList={historyList} />
+              <HistoryModule historyList={historyList} onClearHistory={() => setHistoryList([])} />
             </div>
           )}
 

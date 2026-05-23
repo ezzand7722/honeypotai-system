@@ -1,5 +1,6 @@
 import logging
 import json
+import asyncio
 from uuid import uuid4
 from typing import Optional, Union, Any
 
@@ -194,6 +195,46 @@ async def ingest_honeypot_events_from_file(
     max_records: Optional[int] = Form(None),
     x_shared_secret: Optional[str] = Header(None, alias="X-Shared-Secret"),
 ) -> dict[str, Union[str, int]]:
+
+    async def _process_file_ingest(
+        saved_path: str,
+        pipeline_id: str,
+        chunk_size_val: int,
+        max_records_val: Optional[int],
+    ) -> None:
+        try:
+            raw_records = parse_honeypot_file(saved_path, max_records_val)
+            logger.info("FILE_PARSED_BG pipeline_id=%s records=%s max=%s", pipeline_id, len(raw_records), max_records_val)
+            if not raw_records:
+                logger.warning("FILE_EMPTY_BG pipeline_id=%s path=%s", pipeline_id, saved_path)
+                return
+
+            events = [normalize_event(item) for item in raw_records]
+            raw_logs = [item.model_dump(mode="json") for item in raw_records]
+
+            for index, event in enumerate(events):
+                try:
+                    record_alert(
+                        event,
+                        pipeline_id=pipeline_id,
+                        chunk_index=index // chunk_size_val,
+                        raw_log=raw_logs[index],
+                        normalized_log=event.model_dump(mode="json"),
+                    )
+                except Exception as e:
+                    logger.error("RECORD_ALERT_ERROR_BG pipeline_id=%s event_id=%s error=%s", pipeline_id, event.event_id, e)
+
+            await submit_batch_for_scoring(events, raw_logs, pipeline_id, chunk_size_val)
+            logger.info("FILE_INGEST_BG_COMPLETE pipeline_id=%s", pipeline_id)
+        except Exception as e:
+            logger.error("FILE_INGEST_BG_ERROR pipeline_id=%s error=%s", pipeline_id, e, exc_info=True)
+        finally:
+            try:
+                if os.path.exists(saved_path):
+                    os.remove(saved_path)
+            except Exception:
+                pass
+
     try:
         if x_shared_secret != settings.honeypot_shared_secret:
             raise HTTPException(status_code=401, detail="Invalid honeypot credential")
@@ -215,58 +256,15 @@ async def ingest_honeypot_events_from_file(
         except Exception as e:
             logger.error("FILE_SAVE_ERROR error=%s", e, exc_info=True)
             raise HTTPException(status_code=400, detail=f"Failed to save file: {str(e)}")
-        
-        try:
-            raw_records = parse_honeypot_file(file_path, _max_records)
-            logger.info("FILE_PARSED records=%s max=%s", len(raw_records), _max_records)
-        except Exception as e:
-            logger.error("FILE_PARSE_ERROR error=%s", e, exc_info=True)
-            raise HTTPException(status_code=400, detail=f"Failed to parse file: {str(e)}")
 
-        if not raw_records:
-            raise HTTPException(status_code=400, detail="No valid records found in file")
-
-        try:
-            pipeline_id = str(uuid4())
-            events = [normalize_event(item) for item in raw_records]
-            logger.info("NORMALIZED_EVENTS count=%s", len(events))
-            raw_logs = [item.model_dump(mode="json") for item in raw_records]
-
-            for index, event in enumerate(events):
-                try:
-                    record_alert(
-                        event,
-                        pipeline_id=pipeline_id,
-                        chunk_index=index // _chunk_size,
-                        raw_log=raw_logs[index],
-                        normalized_log=event.model_dump(mode="json"),
-                    )
-                except Exception as e:
-                    logger.error("RECORD_ALERT_ERROR event_id=%s error=%s", event.event_id, e)
-                    continue
-
-            background_tasks.add_task(
-                submit_batch_for_scoring,
-                events,
-                raw_logs,
-                pipeline_id,
-                _chunk_size,
-            )
-
-            total_chunks = (len(events) + _chunk_size - 1) // _chunk_size
-            logger.info("FILE_INGEST_SUCCESS pipeline_id=%s events=%s chunks=%s", pipeline_id, len(events), total_chunks)
-            return {
-                "status": "accepted",
-                "pipeline_id": pipeline_id,
-                "events_received": len(events),
-                "chunks_queued": total_chunks,
-                "source_file": file_path,
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error("PROCESSING_ERROR error=%s", e, exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Error processing events: {str(e)}")
+        pipeline_id = str(uuid4())
+        background_tasks.add_task(_process_file_ingest, file_path, pipeline_id, _chunk_size, _max_records)
+        logger.info("FILE_INGEST_QUEUED pipeline_id=%s path=%s chunk_size=%s max_records=%s", pipeline_id, file_path, _chunk_size, _max_records)
+        return {
+            "status": "accepted",
+            "pipeline_id": pipeline_id,
+            "source_file": file_path,
+        }
     except HTTPException:
         raise
     except Exception as e:

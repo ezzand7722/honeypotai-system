@@ -80,24 +80,63 @@ try {
 # Test 4: File upload
 Write-Host "`n[4] Testing file upload endpoint..." -ForegroundColor Yellow
 if (Test-Path $dataFile) {
-    try {
-        $form = @{
-            file = Get-Item $dataFile
-            chunk_size = 25
-            max_records = 10
+    $iwrSupportsForm = $false
+    try { $iwrSupportsForm = (Get-Command Invoke-WebRequest).Parameters.ContainsKey('Form') } catch { $iwrSupportsForm = $false }
+
+    if ($iwrSupportsForm) {
+        try {
+            $form = @{
+                file = Get-Item $dataFile
+                chunk_size = 25
+                max_records = 10
+            }
+            
+            $fileResp = Invoke-WebRequest -Uri "$baseUrl/honeypot/events/from-file" `
+                -Method POST `
+                -Headers @{"X-Shared-Secret" = $secret} `
+                -Form $form `
+                -UseBasicParsing -TimeoutSec 20
+            Write-Host "✓ File uploaded: $($fileResp.Content)" -ForegroundColor Green
         }
-        
-        $fileResp = Invoke-WebRequest -Uri "$baseUrl/honeypot/events/from-file" `
-            -Method POST `
-            -Headers @{"X-Shared-Secret" = $secret} `
-            -Form $form `
-            -UseBasicParsing -TimeoutSec 10
-        Write-Host "✓ File uploaded: $($fileResp.Content)" -ForegroundColor Green
+        catch {
+            Write-Host "✗ File upload failed: $($_)" -ForegroundColor Red
+            if ($_.Exception.Response) {
+                Write-Host "Status: $($_.Exception.Response.StatusCode)" -ForegroundColor Red
+            }
+        }
     }
-    catch {
-        Write-Host "✗ File upload failed: $($_)" -ForegroundColor Red
-        if ($_.Exception.Response) {
-            Write-Host "Status: $($_.Exception.Response.StatusCode)" -ForegroundColor Red
+    elseif (Get-Command curl.exe -ErrorAction SilentlyContinue) {
+        Write-Host "(Invoke-WebRequest -Form not available; using curl.exe multipart upload)" -ForegroundColor DarkYellow
+        $cmd = @(
+            "curl.exe",
+            "-sS",
+            "-X", "POST",
+            "-H", "X-Shared-Secret: $secret",
+            "-F", "file=@$dataFile",
+            "-F", "chunk_size=25",
+            "-F", "max_records=10",
+            "$baseUrl/honeypot/events/from-file"
+        )
+        try {
+            $out = & $cmd[0] $cmd[1..($cmd.Length-1)]
+            Write-Host "✓ File uploaded: $out" -ForegroundColor Green
+        } catch {
+            Write-Host "✗ curl.exe upload failed: $($_)" -ForegroundColor Red
+        }
+    }
+    else {
+        Write-Host "(No -Form support and curl.exe not found. Falling back to /honeypot/events/batch JSONL replay.)" -ForegroundColor DarkYellow
+        try {
+            $body = Get-Content -Raw -LiteralPath $dataFile
+            $batchResp = Invoke-WebRequest -Uri "$baseUrl/honeypot/events/batch?chunk_size=25" `
+                -Method POST `
+                -ContentType "text/plain" `
+                -Headers @{"X-Shared-Secret" = $secret} `
+                -Body $body `
+                -UseBasicParsing -TimeoutSec 30
+            Write-Host "✓ Batch replay accepted: $($batchResp.Content)" -ForegroundColor Green
+        } catch {
+            Write-Host "✗ Batch replay failed: $($_)" -ForegroundColor Red
         }
     }
 }
