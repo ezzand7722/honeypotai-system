@@ -281,6 +281,9 @@ function App() {
             // But we always allow it to be pushed if we are live testing (polling)!
             if (initialPoll && !isRecent) {
                 addToHistory({ ...mappedAttack, status: 'MITIGATED' });
+                fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
+                  if (d?.stats) setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
+                }).catch(()=>{});
                 return;
             }
 
@@ -291,6 +294,15 @@ function App() {
             if (!initialPoll) addToHistory(mappedAttack);
             setActiveTestAttack(mappedAttack);
             setLastAttackForAlert(mappedAttack);
+            
+            fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
+              if (d?.stats) {
+                setActiveAttacks(curr => curr.map(a => a.id === mappedAttack.id ? { ...a, ...d.stats } : a));
+                setActiveTestAttack(curr => curr?.id === mappedAttack.id ? { ...curr, ...d.stats } : curr);
+                setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
+              }
+            }).catch(()=>{});
+
             if (!isAttacked) {
               setIsAttacked(true);
               setAlarmPlayedForSession(false); // أعد تعيين الإنذار لجلسة الهجمة الجديدة
