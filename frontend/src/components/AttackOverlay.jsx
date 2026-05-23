@@ -710,14 +710,24 @@ const AttackOverlay = ({
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0, 20, 0, 0.9)', border: '1px solid #00ff41', padding: '15px', minHeight: 0, overflow: 'hidden' }}>
               <h4 style={{ color: '#00ff41', fontSize: '14px', marginBottom: '10px' }}>DIGITAL_FORENSIC_TIMELINE</h4>
               <div className="green-scroll" ref={scrollRef} style={{ overflowY: 'auto', flex: 1, paddingRight: '10px' }}>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:22] - INBOUND CONNECTION DETECTED ON PORT ${attackToShow?.port}`} startDelay={1000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:23] - AI SCANNER IDENTIFIED MALICIOUS SIGNATURE: ${attackToShow?.type}`} startDelay={2000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:24] - DEPLOYING VIRTUAL FILE_SYSTEM DECOY" startDelay={3000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:25] - ATTACKER IP ${attackToShow?.ip} BLACKLISTED`} startDelay={4000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:26] - SESSION PURGED | LOGGING INCIDENT" startDelay={5000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:28] - SYSTEM INTEGRITY VERIFIED." startDelay={6000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:30] - ARCHIVING FORENSIC DATA." startDelay={7000} /></div>
-                  <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:32] - MONITORING FOR RE-ENTRY ATTEMPTS..." startDelay={8000} /></div>
+                  {attackToShow?.eventTimeline?.length > 0 ? (
+                      attackToShow.eventTimeline.map((evt, i) => (
+                          <div key={i} style={{ marginBottom: '6px', color: '#00ff41', wordBreak: 'break-all' }}>
+                              <Typewriter text={evt} startDelay={1000 + (i * 1000)} />
+                          </div>
+                      ))
+                  ) : (
+                      <>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:22] - INBOUND CONNECTION DETECTED ON PORT ${attackToShow?.port}`} startDelay={1000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:23] - AI SCANNER IDENTIFIED MALICIOUS SIGNATURE: ${attackToShow?.type}`} startDelay={2000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:24] - DEPLOYING VIRTUAL FILE_SYSTEM DECOY" startDelay={3000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:25] - ATTACKER IP ${attackToShow?.ip} BLACKLISTED`} startDelay={4000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:26] - SESSION PURGED | LOGGING INCIDENT" startDelay={5000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:28] - SYSTEM INTEGRITY VERIFIED." startDelay={6000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:30] - ARCHIVING FORENSIC DATA." startDelay={7000} /></div>
+                          <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text="[22:05:32] - MONITORING FOR RE-ENTRY ATTEMPTS..." startDelay={8000} /></div>
+                      </>
+                  )}
               </div>
           </div>
 

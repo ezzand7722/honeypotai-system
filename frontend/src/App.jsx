@@ -46,6 +46,7 @@ function App() {
 
   const [showLoopbackMenu, setShowLoopbackMenu] = useState(false);
   const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // لتتبع آخر هجمة للإنذار
+  const [alarmPlayedForSession, setAlarmPlayedForSession] = useState(false); // لضمان تشغيل الإنذار مرة واحدة فقط
   const isSpeaking = useRef(false); // لمنع تشغيل وظيفتين نطق في نفس الوقت
   const alertShownForAttackIds = useRef(new Set()); // تتبع الهجمات التي تم عرض الإنذار لها
 
@@ -137,69 +138,6 @@ function App() {
   const alertsFetchInFlight = useRef(false);
   const debugRef = useRef({ lastOkAt: null, lastError: null, lastStatus: null, lastBackendUrl: null, lastAlertsCount: null });
   const loggedBackendConfigRef = useRef(false);
-  const attackerStatsCacheRef = useRef(new Map()); // src_ip -> stats
-
-  const isRecentAlert = useCallback((alert, nowMs, windowMs = 90_000) => {
-    const ra = alert?.details?.received_at || alert?.last_received_at || alert?.received_at;
-    const ms = ra ? Date.parse(ra) : NaN;
-    return Number.isFinite(ms) && (nowMs - ms) <= windowMs;
-  }, []);
-
-  const extractStatsFromPrediction = useCallback((prediction, fallbackInstanceCount = 0) => {
-    const pred = prediction || {};
-    const stats = {
-      connection_count: pred.connection_count ?? null,
-      success_count: pred.success_count ?? null,
-      failed_count: pred.failed_count ?? null,
-      unique_passwords: pred.unique_passwords ?? null,
-      command_count: pred.command_count ?? null,
-      suspicious_commands: pred.suspicious_commands ?? null,
-      stats_source: 'ai',
-    };
-
-    const hasAny = Object.values(stats).some(v => typeof v === 'number');
-    if (hasAny) {
-      // Prefer AI value when present; fallback to instance_count for connection_count.
-      if (stats.connection_count == null && Number.isFinite(fallbackInstanceCount)) {
-        stats.connection_count = fallbackInstanceCount;
-      }
-      return stats;
-    }
-
-    // No AI stats present.
-    return {
-      connection_count: Number.isFinite(fallbackInstanceCount) ? fallbackInstanceCount : 0,
-      success_count: null,
-      failed_count: null,
-      unique_passwords: null,
-      command_count: null,
-      suspicious_commands: null,
-      stats_source: 'missing_ai',
-    };
-  }, []);
-
-  const fetchAttackerStats = useCallback(async (srcIp) => {
-    if (!srcIp) return null;
-    if (attackerStatsCacheRef.current.has(srcIp)) return attackerStatsCacheRef.current.get(srcIp);
-
-    try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-      const res = await fetch(`${backendUrl}/report/attacker-stats?src_ip=${encodeURIComponent(srcIp)}`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      const stats = data?.stats;
-      if (!stats) return null;
-      attackerStatsCacheRef.current.set(srcIp, stats);
-
-      // If AI isn't providing these stats, surface that once in console.
-      if (stats?.ai_provided_any === false) {
-        console.warn('[honeypot] AI prediction did not include attack stats fields; using computed stats from ingested logs for', srcIp);
-      }
-      return stats;
-    } catch {
-      return null;
-    }
-  }, []);
 
   useEffect(() => {
     fetchBackendAlertsRef.current = async () => {
@@ -253,38 +191,20 @@ function App() {
         const shouldShowOverlayOnInitial =
           initialPoll &&
           Array.isArray(data?.alerts) &&
-          data.alerts.some(a => isRecentAlert(a, nowMs, 90_000));
-
-        const alertsArray = Array.isArray(data?.alerts) ? data.alerts : [];
-        const eligibleAlerts = initialPoll
-          ? (shouldShowOverlayOnInitial ? alertsArray.filter(a => isRecentAlert(a, nowMs, 90_000)) : [])
-          : alertsArray;
-
-        // IMPORTANT: Don't mark the UI as attacked on initial load just because
-        // the backend still has old/stale alerts in memory.
-        if (initialPoll && !shouldShowOverlayOnInitial) {
-          eligibleAlerts.forEach(alert => {
-            const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
-            const receivedAtIso = alert?.details?.received_at;
-            const receivedAtMs = receivedAtIso ? Date.parse(receivedAtIso) : NaN;
-            const instanceCount = Number(alert.instance_count ?? 0) || 0;
-            const token = String(Number.isFinite(receivedAtMs) ? receivedAtMs : (receivedAtIso || '')) + '|' + String(instanceCount);
-            seenAlertToken.current.set(alertId, token);
+          data.alerts.some(a => {
+            const ra = a?.details?.received_at;
+            const ms = ra ? Date.parse(ra) : NaN;
+            return Number.isFinite(ms) && (nowMs - ms) <= 90_000;
           });
-          return;
-        }
 
-        if (data.status === "success" && eligibleAlerts.length > 0) {
-          eligibleAlerts.forEach(alert => {
+        if (data.status === "success" && data.alerts && data.alerts.length > 0) {
+          data.alerts.forEach(alert => {
             const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
 
             const receivedAtIso = alert?.details?.received_at;
             const receivedAtMs = receivedAtIso ? Date.parse(receivedAtIso) : NaN;
             const lastSeenSeconds = Number(alert.last_seen ?? alert.timestamp ?? alert.first_seen ?? 0) || 0;
             const instanceCount = Number(alert.instance_count ?? 0) || 0;
-
-            const prediction = alert?.details?.prediction || null;
-            const aiStats = extractStatsFromPrediction(prediction, instanceCount);
 
             // Token changes when the backend ingests new events for the same AGG id
             const token = String(
@@ -303,6 +223,21 @@ function App() {
               : (alert.timestamp
                 ? new Date(alert.timestamp * 1000).toISOString().replace('T', ' ').split('.')[0]
                 : new Date().toISOString().replace('T', ' ').split('.')[0]);
+
+            const timeline = [];
+            const timeStr = dateStr.split(' ')[1] || "00:00:00";
+            const targetPort = alert.dest_port || alert.details?.dest_port || "Unknown";
+            timeline.push(`[${timeStr}] - INBOUND CONNECTION DETECTED ON PORT ${targetPort}`);
+            timeline.push(`[${timeStr}] - AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'UNKNOWN'}`);
+            if (alert.details?.explanation) {
+                timeline.push(`[${timeStr}] - AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`);
+            } else if (alert.details?.command) {
+                timeline.push(`[${timeStr}] - MALICIOUS COMMAND EXECUTED: ${alert.details.command}`);
+            } else {
+                timeline.push(`[${timeStr}] - DEPLOYING VIRTUAL FILE_SYSTEM DECOY`);
+            }
+            timeline.push(`[${timeStr}] - ATTACKER IP ${alert.src_ip || 'Unknown'} BLACKLISTED`);
+            timeline.push(`[${timeStr}] - SESSION PURGED | LOGGING INCIDENT`);
 
             const mappedAttack = {
               id: alertId,
@@ -332,18 +267,19 @@ function App() {
               last_seen: lastSeenSeconds,
               received_at: receivedAtIso || null,
               instance_count: instanceCount,
-              connection_count: aiStats.connection_count,
-              success_count: aiStats.success_count,
-              failed_count: aiStats.failed_count,
-              unique_passwords: aiStats.unique_passwords,
-              command_count: aiStats.command_count,
-              suspicious_commands: aiStats.suspicious_commands,
-              stats_source: aiStats.stats_source,
               startTime: Date.now(),
               duration: 60000 + Math.random() * 30000,
-              progress: 0
+              progress: 0,
+              eventTimeline: timeline
             };
             
+            const isRecent = Number.isFinite(receivedAtMs) && (nowMs - receivedAtMs) <= 60_000;
+            
+            if (!isRecent) {
+                if (initialPoll) addToHistory({ ...mappedAttack, status: 'MITIGATED' });
+                return;
+            }
+
             setActiveAttacks(prev => {
               const next = prev.filter(a => a.id !== mappedAttack.id);
               return [{ ...mappedAttack, timestamp: new Date().toLocaleTimeString() }, ...next];
@@ -351,30 +287,13 @@ function App() {
             if (!initialPoll) addToHistory(mappedAttack);
             setActiveTestAttack(mappedAttack);
             setLastAttackForAlert(mappedAttack);
-            if (!isAttacked) setIsAttacked(true);
+            if (!isAttacked) {
+              setIsAttacked(true);
+              setAlarmPlayedForSession(false); // أعد تعيين الإنذار لجلسة الهجمة الجديدة
+            }
 
             // Make new backend alerts visible immediately.
             if (!initialPoll || shouldShowOverlayOnInitial) setShowOverlay(true);
-
-            // If AI did not supply stats, fetch computed stats once per attacker IP.
-            if (mappedAttack?.src_ip && mappedAttack.stats_source !== 'ai') {
-              const srcIp = mappedAttack.src_ip;
-              fetchAttackerStats(srcIp).then((stats) => {
-                if (!stats) return;
-                const patch = {
-                  connection_count: stats.connection_count,
-                  success_count: stats.success_count,
-                  failed_count: stats.failed_count,
-                  unique_passwords: stats.unique_passwords,
-                  command_count: stats.command_count,
-                  suspicious_commands: stats.suspicious_commands,
-                  stats_source: 'computed_logs',
-                };
-                setActiveTestAttack(prev => (prev && prev.src_ip === srcIp) ? { ...prev, ...patch } : prev);
-                setActiveAttacks(prev => prev.map(a => (a?.src_ip === srcIp) ? { ...a, ...patch } : a));
-                setHistoryList(prev => prev.map(h => (h?.src_ip === srcIp || h?.ip === srcIp) ? { ...h, ...patch } : h));
-              });
-            }
           });
         }
       } catch (err) {
@@ -458,7 +377,7 @@ function App() {
   useEffect(() => {
     attackRef.current = isAttacked;
 
-    if (isAttacked && showOverlay && !alertSuppressed) {
+    if (isAttacked && showOverlay && !alertSuppressed && !alarmPlayedForSession) {
       // تشغيل الإنذار الصوتي (Siren) مرة واحدة فقط عند بدء الهجمة
       if (sirenAudio.current && sirenAudio.current.paused) {
         sirenAudio.current.loop = true;
@@ -466,7 +385,9 @@ function App() {
       }
       // تشغيل النطق
       playFemaleAlert();
-    } else {
+      // وضع علامة على أن الإنذار تم تشغيله
+      setAlarmPlayedForSession(true);
+    } else if (!isAttacked) {
       // إيقاف كل شيء عند انتهاء الهجوم أو كتم الصوت
       window.speechSynthesis.cancel();
       isSpeaking.current = false;
@@ -475,7 +396,7 @@ function App() {
         sirenAudio.current.currentTime = 0;
       }
     }
-  }, [isAttacked, showOverlay, alertSuppressed, playFemaleAlert]);
+  }, [isAttacked, showOverlay, alertSuppressed, playFemaleAlert, alarmPlayedForSession]);
 
   const muteAlerts = () => {
     if (sirenAudio.current) {
@@ -539,6 +460,7 @@ function App() {
     setActiveTestAttack(null);
     setActiveAttacks([]);
     setLastAttackForAlert(null); // أعد تعيين الإنذار
+    setAlarmPlayedForSession(false); // أعد تعيين علم الإنذار للجلسة الجديدة
     setDoubleAttackMode(false);
     setAlertSuppressed(false);
     setSelectedAttackForDetail(null);
@@ -706,11 +628,11 @@ function App() {
       setDoubleAttackMode(false);
       setShowMultiAttackDetail(false);
       setAlertSuppressed(false);
+      setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار للهجمة الجديدة
       setHeuristicProgress(0);
       isFinalizing.current = false;
       setCurrentScreen('main');
       setLiveLog("🔴 ATTACK_VECTORS_DETECTED");
-      if (sirenAudio.current) { sirenAudio.current.loop = true; sirenAudio.current.play().catch(() => { }); }
     } else {
       finalizeAttackAndSave();
     }
@@ -721,18 +643,11 @@ function App() {
     if (!isAttacked || settings.shieldActive) return;
     const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
     setActiveAttacks(prev => [...prev, newAttack]);
-    setLastAttackForAlert(newAttack); // حدث الإنذار ليقرأ الهجمة الجديدة
+    setLastAttackForAlert(newAttack); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`🔴 NEW_ATTACK_VECTOR_DETECTED: ${newAttack.type}`);
-    if (sirenAudio.current) {
-      sirenAudio.current.play().catch(() => { });
-    }
-    try {
-      sfx.playAlarm();
-      sfx.playType();
-      sfx.playType();
-    } catch (e) { }
+    // لا نشغل الإنذار هنا - فقط الهجمة الأولى تشغل الإنذار
   };
 
   const startDoubleAttack = () => {
@@ -753,12 +668,11 @@ function App() {
     setIsAttacked(true);
     setShowOverlay(true);
     setAlertSuppressed(false);
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setHeuristicProgress(0);
     isFinalizing.current = false;
     setCurrentScreen('main');
     setLiveLog("🔴 DUAL_VECTOR_ATTACK_INITIATED!");
-    if (sirenAudio.current) { sirenAudio.current.loop = true; sirenAudio.current.play().catch(() => { }); }
-    try { sfx.playAlarm(); sfx.playType(); } catch (e) { }
   };
 
   // دالة جديدة: إضافة double attack جديد بدون إنهاء الهجمات الحالية
@@ -767,18 +681,11 @@ function App() {
     const [attack1, attack2] = createDoubleAttackVectors();
     const now = Date.now();
     setActiveAttacks(prev => [...prev, { ...attack1, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 }, { ...attack2, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 }]);
-    setLastAttackForAlert(attack1); // حدث الإنذار ليقرأ الهجمة الجديدة الأولى
+    setLastAttackForAlert(attack1); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`🔴 DUAL_VECTOR_ATTACK_ADDED: ${attack1.type} + ${attack2.type}`);
-    if (sirenAudio.current) {
-      sirenAudio.current.play().catch(() => { });
-    }
-    try {
-      sfx.playAlarm();
-      sfx.playType();
-      sfx.playType();
-    } catch (e) { }
+    // لا نشغل الإنذار هنا - فقط الهجمة الأولى تشغل الإنذار
   };
 
   const startMultiAttack = () => {
@@ -797,13 +704,12 @@ function App() {
     setIsAttacked(true);
     setShowOverlay(true);
     setAlertSuppressed(false);
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setHeuristicProgress(0);
     isFinalizing.current = false;
     setCurrentScreen('main');
     setLastAttackForAlert(newAttacks[0]); // حدث الإنذار ليقرأ الهجمة الأولى
     setLiveLog(`🔴 MULTI_ATTACKS_INITIATED x${count}`);
-    if (sirenAudio.current) { sirenAudio.current.loop = true; sirenAudio.current.play().catch(() => { }); }
-    try { sfx.playAlarm(); newAttacks.forEach(() => sfx.playType()); } catch (e) { }
   };
 
   // دالة جديدة: إضافة multi attack جديد بدون إنهاء الهجمات الحالية
@@ -819,17 +725,11 @@ function App() {
     }
 
     setActiveAttacks(prev => [...prev, ...newAttacks]);
-    setLastAttackForAlert(newAttacks[0]); // حدث الإنذار ليقرأ الهجمة الجديدة الأولى
+    setLastAttackForAlert(newAttacks[0]); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`🔴 NEW_ATTACKS_ADDED x${count}`);
-    if (sirenAudio.current) {
-      sirenAudio.current.play().catch(() => { });
-    }
-    try {
-      sfx.playAlarm();
-      newAttacks.forEach(() => sfx.playType());
-    } catch (e) { }
+    // لا نشغل الإنذار هنا - فقط الهجمة الأولى تشغل الإنذار
   };
 
   const startLoopbackAttack = (type) => {
@@ -842,6 +742,7 @@ function App() {
     setDoubleAttackMode(false);
     setShowMultiAttackDetail(false);
     setAlertSuppressed(false);
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setIsAttacked(true);
     setShowOverlay(true);
     setShowLoopbackMenu(false);
@@ -849,8 +750,6 @@ function App() {
     isFinalizing.current = false;
     setCurrentScreen('main');
     setLiveLog(`⚠️ EXECUTING: ${lbAttack.type}`);
-    if (sirenAudio.current) { sirenAudio.current.loop = true; sirenAudio.current.play().catch(() => { }); }
-    try { sfx.playAlarm(); sfx.playType(); } catch (e) { }
   };
 
   // دالة جديدة: إضافة loopback attack جديد بدون إنهاء الهجمات الحالية
@@ -858,14 +757,11 @@ function App() {
     if (!isAttacked || settings.shieldActive) return;
     const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
     setActiveAttacks(prev => [...prev, lbAttack]);
-    setLastAttackForAlert(lbAttack); // حدث الإنذار ليقرأ الهجمة الجديدة
+    setLastAttackForAlert(lbAttack); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`⚠️ NEW_LOOPBACK_ADDED: ${lbAttack.type}`);
-    if (sirenAudio.current) {
-      sirenAudio.current.play().catch(() => { });
-    }
-    try { sfx.playAlarm(); sfx.playType(); } catch (e) { }
+    // لا نشغل الإنذار هنا - فقط الهجمة الأولى تشغل الإنذار
   };
 
   const openAttackDetail = (attack) => {
