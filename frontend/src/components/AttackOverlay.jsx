@@ -711,11 +711,16 @@ const AttackOverlay = ({
               <h4 style={{ color: '#00ff41', fontSize: '14px', marginBottom: '10px' }}>DIGITAL_FORENSIC_TIMELINE</h4>
               <div className="green-scroll" ref={scrollRef} style={{ overflowY: 'auto', flex: 1, paddingRight: '10px' }}>
                   {attackToShow?.eventTimeline?.length > 0 ? (
-                      attackToShow.eventTimeline.map((evt, i) => (
-                          <div key={i} style={{ marginBottom: '6px', color: '#00ff41', wordBreak: 'break-all' }}>
-                              <Typewriter text={evt} startDelay={1000 + (i * 1000)} />
-                          </div>
-                      ))
+                      attackToShow.eventTimeline.map((evt, i) => {
+                          const text = typeof evt === 'string' 
+                              ? evt 
+                              : `[${evt.time}] - ${evt.event}`;
+                          return (
+                              <div key={i} style={{ marginBottom: '6px', color: '#00ff41', wordBreak: 'break-all' }}>
+                                  <Typewriter text={text} startDelay={1000 + (i * 1000)} />
+                              </div>
+                          );
+                      })
                   ) : (
                       <>
                           <div style={{ marginBottom: '6px', color: '#00ff41' }}><Typewriter text={`[22:05:22] - INBOUND CONNECTION DETECTED ON PORT ${attackToShow?.port}`} startDelay={1000} /></div>

@@ -211,6 +211,9 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
             "unique_passwords": result.get("unique_passwords", 0),
             "command_count": result.get("command_count", 0),
             "suspicious_commands": result.get("suspicious_commands", 0),
+            "pipeline": result.get("pipeline", []),
+            "attack_id": result.get("attack_id", ""),
+            "detection_time": result.get("detection_time", ""),
             ** (pipeline_info or {})
         }
     )

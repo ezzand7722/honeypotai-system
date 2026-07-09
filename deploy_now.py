@@ -8,7 +8,7 @@ import sys
 
 HOST = "206.189.62.245"
 USER = "root"
-KEY_PATH = r"C:\Users\Administrator\.ssh\do_honeypot_ed25519"
+KEY_PATH = os.path.expanduser(r"~/.ssh/do_honeypot_ed25519_nopass")
 
 DEPLOY_COMMANDS = """
 set -e

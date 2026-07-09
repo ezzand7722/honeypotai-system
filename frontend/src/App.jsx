@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import LiveMap from './components/LiveMap';
 import NetworkModule from './components/NetworkModule';
 import HistoryModule from './components/HistoryModule';
@@ -229,17 +229,36 @@ function App() {
             const timeline = [];
             const timeStr = dateStr.split(' ')[1] || "00:00:00";
             const targetPort = alert.dest_port || alert.details?.dest_port || "Unknown";
-            timeline.push(`[${timeStr}] - INBOUND CONNECTION DETECTED ON PORT ${targetPort}`);
-            timeline.push(`[${timeStr}] - AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'UNKNOWN'}`);
-            if (alert.details?.explanation) {
-                timeline.push(`[${timeStr}] - AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`);
-            } else if (alert.details?.command) {
-                timeline.push(`[${timeStr}] - MALICIOUS COMMAND EXECUTED: ${alert.details.command}`);
+
+            if (alert.details?.pipeline && Array.isArray(alert.details.pipeline)) {
+                alert.details.pipeline.forEach(item => {
+                    let status = 'success';
+                    const eventName = item.event || '';
+                    if (eventName.includes('ATTACK') || eventName.includes('ALERT') || eventName.includes('HIGH') || eventName.includes('DETECTED') || eventName.includes('SEVERITY')) {
+                        status = 'critical';
+                    } else if (eventName.includes('CLEAN') || eventName.includes('RECEIVED') || eventName.includes('STARTED') || eventName.includes('EXTRACTED')) {
+                        status = 'warning';
+                    }
+                    const eventDesc = item.message ? `${eventName}: ${item.message}` : eventName;
+                    timeline.push({
+                        time: item.time || timeStr,
+                        event: eventDesc,
+                        status: status
+                    });
+                });
             } else {
-                timeline.push(`[${timeStr}] - DEPLOYING VIRTUAL FILE_SYSTEM DECOY`);
+                timeline.push({ time: timeStr, event: `INBOUND CONNECTION DETECTED ON PORT ${targetPort}`, status: 'warning' });
+                timeline.push({ time: timeStr, event: `AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'UNKNOWN'}`, status: 'critical' });
+                if (alert.details?.explanation) {
+                    timeline.push({ time: timeStr, event: `AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`, status: 'critical' });
+                } else if (alert.details?.command) {
+                    timeline.push({ time: timeStr, event: `MALICIOUS COMMAND EXECUTED: ${alert.details.command}`, status: 'critical' });
+                } else {
+                    timeline.push({ time: timeStr, event: `DEPLOYING VIRTUAL FILE_SYSTEM DECOY`, status: 'success' });
+                }
+                timeline.push({ time: timeStr, event: `ATTACKER IP ${alert.src_ip || 'Unknown'} BLACKLISTED`, status: 'success' });
+                timeline.push({ time: timeStr, event: `SESSION PURGED | LOGGING INCIDENT`, status: 'success' });
             }
-            timeline.push(`[${timeStr}] - ATTACKER IP ${alert.src_ip || 'Unknown'} BLACKLISTED`);
-            timeline.push(`[${timeStr}] - SESSION PURGED | LOGGING INCIDENT`);
 
             const mappedAttack = {
               id: alertId,
