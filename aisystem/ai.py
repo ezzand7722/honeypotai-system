@@ -22,10 +22,12 @@ if data.empty:
     print("No logs found.")
     exit()
 
-for col in ["src_ip", "eventid", "timestamp", "username", "password", "input", "protocol"]:
+cols_to_keep = ["src_ip", "eventid", "timestamp", "username", "password", "input", "protocol"]
+for col in cols_to_keep:
     if col not in data.columns:
         data[col] = ""
 
+data = data[cols_to_keep]
 data = data.fillna("")
 data = data.drop_duplicates()
 data["timestamp"] = pd.to_datetime(data["timestamp"], errors="coerce")
