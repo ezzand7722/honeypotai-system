@@ -34,7 +34,7 @@ const Header = ({ settings, isAttacked, time, liveLog }) => {
       <div className="h-right" style={{ textAlign: 'right', display: 'flex', flexDirection: 'row', justifyContent: 'flex-end', gap: '20px', alignItems: 'center' }}>
         <div style={{fontSize: '11px', color: '#00ff41', opacity: 0.8, fontFamily: 'monospace', lineHeight: '1.4'}}>
           <div>CIPHER: <span style={{color: '#fff'}}>{settings.encryptionType.split('_')[0]}</span></div>
-          <div>AUTO_MITIGATION: <span style={{color: settings.autoMitigation ? '#00ff41' : '#ff4444'}}>{settings.autoMitigation ? 'ON' : 'OFF'}</span></div>
+          <div>SHIELD: <span style={{color: settings.shieldActive ? '#00ff41' : '#ff4444'}}>{settings.shieldActive ? 'ON' : 'OFF'}</span></div>
         </div>
         <div style={{fontFamily: 'Orbitron, monospace'}}>
           <div style={{fontSize: '26px', color: '#00ff41', fontWeight: 'bold'}}>{time.toLocaleTimeString([], { hour12: false })}</div>

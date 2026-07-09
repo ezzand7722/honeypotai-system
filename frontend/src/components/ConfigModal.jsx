@@ -71,8 +71,6 @@ const ConfigModal = ({ settings, setSettings, activeTab, setActiveTab }) => {
                   checked={settings.shieldActive} 
                   onChange={(v) => updateSetting('shieldActive', v)} 
                 />
-                <SettingRow label="AUTO_MITIGATION" desc="DEPLOY COUNTER-MEASURES ON THREAT" checked={settings.autoMitigation} onChange={(v) => updateSetting('autoMitigation', v)} />
-                <SettingRow label="STEALTH_MODE" desc="ENCRYPT SYSTEM SIGNATURE" checked={settings.stealthMode} onChange={(v) => updateSetting('stealthMode', v)} />
               </>
             )}
 

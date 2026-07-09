@@ -67,17 +67,6 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                     {settings.shieldActive ? '>>>> SHIELD_ACTIVE' : '>>>> SHIELD_OFFLINE'}
                   </button>
                 </div>
-
-                <div className="config-card">
-                  <label>AUTO_MITIGATION</label>
-                  <p>AI-driven automated threat countermeasures.</p>
-                  <button 
-                    className={`toggle-action ${settings.autoMitigation ? 'on' : ''}`}
-                    onClick={() => updateConfig('autoMitigation', !settings.autoMitigation)}
-                  >
-                    {settings.autoMitigation ? '>>>> ENABLED' : '>>>> DISABLED'}
-                  </button>
-                </div>
               </div>
             )}
 
