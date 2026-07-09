@@ -111,9 +111,9 @@ def main():
     )
 
     if result.returncode == 0:
-        print("\n✅ Deployment successful!")
+        print("\n[SUCCESS] Deployment successful!")
     else:
-        print(f"\n❌ Deployment failed with exit code {result.returncode}")
+        print(f"\n[FAILED] Deployment failed with exit code {result.returncode}")
         if result.returncode == 255:
             print("\nCommon causes for exit code 255:")
             print("- SSH key passphrase prompt could not be satisfied")
