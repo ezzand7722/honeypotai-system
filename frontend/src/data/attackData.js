@@ -2,11 +2,45 @@
 
 // 1. البيانات الأولية للهيستوري (تظهر عند تشغيل النظام لأول مرة)
 export const initialHistoryData = [
-    { id: 'EV-9901', date: '2026-03-29 18:00:13', type: 'BRUTE FORCE (PORT:554)', attack: 'BRUTE FORCE (PORT:554)', attack_type: 'BRUTE FORCE (PORT:554)', ip: '185.22.154.66', src_ip: '185.22.154.66', port: '554', proto: 'TCP/RTSP', loc: 'Moscow, RU', status: 'BLOCKED', threat: '92%', severity: '92%', coords: { lat: 55.7558, lng: 37.6173 }, connection_count: 342, success_count: 12, failed_count: 78, unique_passwords: 89, command_count: 45, suspicious_commands: 12 },
-    { id: 'EV-8842', date: '2026-03-29 20:15:44', type: 'DICTIONARY ATTACK (PORT:80)', attack: 'DICTIONARY ATTACK (PORT:80)', attack_type: 'DICTIONARY ATTACK (PORT:80)', ip: '45.12.33.102', src_ip: '45.12.33.102', port: '80', proto: 'HTTP', loc: 'Beijing, CN', status: 'MITIGATED', threat: '75%', severity: '75%', coords: { lat: 39.9042, lng: 116.4074 }, connection_count: 215, success_count: 8, failed_count: 54, unique_passwords: 67, command_count: 28, suspicious_commands: 7 },
-    { id: 'EV-7721', date: '2026-03-29 21:05:02', type: 'SSH TUNNEL EXPLOIT', attack: 'SSH TUNNEL EXPLOIT', attack_type: 'SSH TUNNEL EXPLOIT', ip: '103.44.201.12', src_ip: '103.44.201.12', port: '2222', proto: 'TCP/SSH', loc: 'Seoul, KR', status: 'DROPPED', threat: '98%', severity: '98%', coords: { lat: 37.5665, lng: 126.9780 }, connection_count: 567, success_count: 23, failed_count: 156, unique_passwords: 145, command_count: 92, suspicious_commands: 34 },
-    { id: 'EV-6610', date: '2026-03-29 21:44:10', type: 'MIRAI BOTNET SCAN', attack: 'MIRAI BOTNET SCAN', attack_type: 'MIRAI BOTNET SCAN', ip: '192.168.5.21', src_ip: '192.168.5.21', port: '23', proto: 'TELNET', loc: 'Tokyo, JP', status: 'LOGGED', threat: '85%', severity: '85%', coords: { lat: 35.6762, lng: 139.6503 }, connection_count: 428, success_count: 16, failed_count: 98, unique_passwords: 102, command_count: 67, suspicious_commands: 21 },
-    { id: 'EV-5509', date: '2026-03-29 22:10:05', type: 'MULTI-VECTOR FLOOD', attack: 'MULTI-VECTOR FLOOD', attack_type: 'MULTI-VECTOR FLOOD', ip: '210.10.55.88', src_ip: '210.10.55.88', port: 'ALL (80, 554, 23)', proto: 'TCP/UDP', loc: 'Frankfurt, DE', status: 'ISOLATED', threat: '99%', severity: '99%', coords: { lat: 50.1109, lng: 8.6821 }, connection_count: 823, success_count: 31, failed_count: 234, unique_passwords: 178, command_count: 115, suspicious_commands: 43 }
+    { id: 'EV-9901', date: '2026-03-29 18:00:13', type: 'BRUTE FORCE (PORT:554)', attack: 'BRUTE FORCE (PORT:554)', attack_type: 'BRUTE FORCE (PORT:554)', ip: '185.22.154.66', src_ip: '185.22.154.66', port: '554', proto: 'TCP/RTSP', loc: 'Moscow, RU', status: 'BLOCKED', threat: '92%', severity: '92%', coords: { lat: 55.7558, lng: 37.6173 }, connection_count: 342, success_count: 12, failed_count: 78, unique_passwords: 89, command_count: 45, suspicious_commands: 12, eventTimeline: [
+        { time: '18:00:13', event: 'INBOUND CONNECTION DETECTED ON PORT 554', status: 'critical' },
+        { time: '18:00:15', event: 'AI SCANNER IDENTIFIED SIGNATURE: BRUTE FORCE (PORT:554)', status: 'critical' },
+        { time: '18:00:18', event: 'CREDENTIAL_GUESSING_DETECTED: 78 FAILED ATTEMPTS', status: 'warning' },
+        { time: '18:00:22', event: 'ATTACKER IP 185.22.154.66 BLACKLISTED', status: 'success' },
+        { time: '18:00:25', event: 'SESSION PURGED | LOGGING INCIDENT', status: 'success' },
+    ]},
+    { id: 'EV-8842', date: '2026-03-29 20:15:44', type: 'DICTIONARY ATTACK (PORT:80)', attack: 'DICTIONARY ATTACK (PORT:80)', attack_type: 'DICTIONARY ATTACK (PORT:80)', ip: '45.12.33.102', src_ip: '45.12.33.102', port: '80', proto: 'HTTP', loc: 'Beijing, CN', status: 'MITIGATED', threat: '75%', severity: '75%', coords: { lat: 39.9042, lng: 116.4074 }, connection_count: 215, success_count: 8, failed_count: 54, unique_passwords: 67, command_count: 28, suspicious_commands: 7, eventTimeline: [
+        { time: '20:15:44', event: 'INBOUND CONNECTION DETECTED ON PORT 80', status: 'critical' },
+        { time: '20:15:46', event: 'AI SCANNER IDENTIFIED SIGNATURE: DICTIONARY ATTACK', status: 'critical' },
+        { time: '20:15:50', event: 'HTTP CREDENTIAL FLOOD: 67 UNIQUE PASSWORDS ATTEMPTED', status: 'warning' },
+        { time: '20:15:55', event: 'ATTACKER IP 45.12.33.102 BLACKLISTED', status: 'success' },
+        { time: '20:15:58', event: 'SESSION PURGED | LOGGING INCIDENT', status: 'success' },
+    ]},
+    { id: 'EV-7721', date: '2026-03-29 21:05:02', type: 'SSH TUNNEL EXPLOIT', attack: 'SSH TUNNEL EXPLOIT', attack_type: 'SSH TUNNEL EXPLOIT', ip: '103.44.201.12', src_ip: '103.44.201.12', port: '2222', proto: 'TCP/SSH', loc: 'Seoul, KR', status: 'DROPPED', threat: '98%', severity: '98%', coords: { lat: 37.5665, lng: 126.9780 }, connection_count: 567, success_count: 23, failed_count: 156, unique_passwords: 145, command_count: 92, suspicious_commands: 34, eventTimeline: [
+        { time: '21:05:02', event: 'INBOUND CONNECTION DETECTED ON PORT 2222', status: 'critical' },
+        { time: '21:05:04', event: 'AI SCANNER IDENTIFIED SIGNATURE: SSH TUNNEL EXPLOIT', status: 'critical' },
+        { time: '21:05:08', event: 'SSH_KEY_HARVEST_ATTEMPT: 34 SUSPICIOUS COMMANDS', status: 'critical' },
+        { time: '21:05:12', event: 'PRIVILEGE_ESCALATION_BLOCKED', status: 'warning' },
+        { time: '21:05:16', event: 'ATTACKER IP 103.44.201.12 BLACKLISTED', status: 'success' },
+        { time: '21:05:19', event: 'SESSION PURGED | LOGGING INCIDENT', status: 'success' },
+    ]},
+    { id: 'EV-6610', date: '2026-03-29 21:44:10', type: 'MIRAI BOTNET SCAN', attack: 'MIRAI BOTNET SCAN', attack_type: 'MIRAI BOTNET SCAN', ip: '192.168.5.21', src_ip: '192.168.5.21', port: '23', proto: 'TELNET', loc: 'Tokyo, JP', status: 'LOGGED', threat: '85%', severity: '85%', coords: { lat: 35.6762, lng: 139.6503 }, connection_count: 428, success_count: 16, failed_count: 98, unique_passwords: 102, command_count: 67, suspicious_commands: 21, eventTimeline: [
+        { time: '21:44:10', event: 'INBOUND CONNECTION DETECTED ON PORT 23 (TELNET)', status: 'critical' },
+        { time: '21:44:13', event: 'AI SCANNER IDENTIFIED SIGNATURE: MIRAI BOTNET SCAN', status: 'critical' },
+        { time: '21:44:17', event: 'BOTNET_FINGERPRINT_MATCHED: MIRAI VARIANT', status: 'warning' },
+        { time: '21:44:21', event: 'LATERAL_MOVEMENT_CONTAINED', status: 'warning' },
+        { time: '21:44:25', event: 'ATTACKER IP 192.168.5.21 BLACKLISTED', status: 'success' },
+        { time: '21:44:28', event: 'SESSION PURGED | LOGGING INCIDENT', status: 'success' },
+    ]},
+    { id: 'EV-5509', date: '2026-03-29 22:10:05', type: 'MULTI-VECTOR FLOOD', attack: 'MULTI-VECTOR FLOOD', attack_type: 'MULTI-VECTOR FLOOD', ip: '210.10.55.88', src_ip: '210.10.55.88', port: 'ALL (80, 554, 23)', proto: 'TCP/UDP', loc: 'Frankfurt, DE', status: 'ISOLATED', threat: '99%', severity: '99%', coords: { lat: 50.1109, lng: 8.6821 }, connection_count: 823, success_count: 31, failed_count: 234, unique_passwords: 178, command_count: 115, suspicious_commands: 43, eventTimeline: [
+        { time: '22:10:05', event: 'MULTI-VECTOR ATTACK DETECTED ON PORTS 80, 554, 23', status: 'critical' },
+        { time: '22:10:08', event: 'AI SCANNER IDENTIFIED SIGNATURE: MULTI-VECTOR FLOOD', status: 'critical' },
+        { time: '22:10:12', event: 'DDoS_FLOOD_DETECTED: 823 CONNECTIONS', status: 'critical' },
+        { time: '22:10:16', event: 'TRAFFIC_REROUTED_TO_HONEYPOT_DECOY', status: 'warning' },
+        { time: '22:10:20', event: 'THREAT_NEUTRALIZED: ISOLATION_COMPLETE', status: 'success' },
+        { time: '22:10:23', event: 'ATTACKER IP 210.10.55.88 BLACKLISTED', status: 'success' },
+        { time: '22:10:25', event: 'SESSION PURGED | LOGGING INCIDENT', status: 'success' },
+    ]},
 ];
 
 // 2. مجمع أنواع التهديدات (للهجمات العشوائية)

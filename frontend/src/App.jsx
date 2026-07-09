@@ -5,6 +5,7 @@ import HistoryModule from './components/HistoryModule';
 import AttackOverlay from './components/AttackOverlay';
 import AnalysisScreen from './components/AnalysisScreen';
 import GateController from './components/GateController';
+import LogUploadModal from './components/LogUploadModal';
 
 import Icons from './components/Icons';
 import Header from './components/Header';
@@ -230,7 +231,7 @@ function App() {
             const timeStr = dateStr.split(' ')[1] || "00:00:00";
             const targetPort = alert.dest_port || alert.details?.dest_port || "Unknown";
 
-            if (alert.details?.pipeline && Array.isArray(alert.details.pipeline)) {
+            if (alert.details?.pipeline && Array.isArray(alert.details.pipeline) && alert.details.pipeline.length > 0) {
                 alert.details.pipeline.forEach(item => {
                     let status = 'success';
                     const eventName = item.event || '';
@@ -253,8 +254,13 @@ function App() {
                     timeline.push({ time: timeStr, event: `AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`, status: 'critical' });
                 } else if (alert.details?.command) {
                     timeline.push({ time: timeStr, event: `MALICIOUS COMMAND EXECUTED: ${alert.details.command}`, status: 'critical' });
+                } else if (alert.details?.attack_type) {
+                    timeline.push({ time: timeStr, event: `DEPLOYING HONEYPOT DECOY AGAINST: ${alert.details.attack_type}`, status: 'warning' });
                 } else {
-                    timeline.push({ time: timeStr, event: `DEPLOYING VIRTUAL FILE_SYSTEM DECOY`, status: 'success' });
+                    timeline.push({ time: timeStr, event: `DEPLOYING VIRTUAL FILE_SYSTEM DECOY`, status: 'warning' });
+                }
+                if (alert.details?.connection_count > 0) {
+                    timeline.push({ time: timeStr, event: `CONNECTIONS_TRACKED: ${alert.details.connection_count} | FAILED: ${alert.details.failed_count || 0}`, status: 'critical' });
                 }
                 timeline.push({ time: timeStr, event: `ATTACKER IP ${alert.src_ip || 'Unknown'} BLACKLISTED`, status: 'success' });
                 timeline.push({ time: timeStr, event: `SESSION PURGED | LOGGING INCIDENT`, status: 'success' });
@@ -1046,7 +1052,27 @@ function App() {
               <button onClick={isAttacked ? addMultiVector : startMultiAttack} className="control-btn-pro multi-btn" style={{ opacity: 1 }}>
                 {isAttacked ? "ADD_MULTI_VECTOR" : "MULTI_ATTACK"}
               </button>
+
+              {!isAttacked && (
+                <button
+                  onClick={() => setShowLogUpload(true)}
+                  className="control-btn-pro"
+                  style={{ borderColor: '#00aaff !important', color: '#00aaff', background: 'transparent', border: '1px solid #00aaff' }}
+                >
+                  IMPORT_LOGS
+                </button>
+              )}
             </div>
+          )}
+
+          {showLogUpload && (
+            <LogUploadModal
+              onClose={() => setShowLogUpload(false)}
+              onUploadComplete={(data) => {
+                setShowLogUpload(false);
+                setLiveLog(`LOG_IMPORT_QUEUED: ${data.pipeline_id?.substring(0, 8)}... | AWAITING_AI_ANALYSIS`);
+              }}
+            />
           )}
 
           {showMultiAttackDetail && selectedAttackForDetail && (
