@@ -266,6 +266,13 @@ function App() {
                 timeline.push({ time: timeStr, event: `SESSION PURGED | LOGGING INCIDENT`, status: 'success' });
             }
 
+            // --- DIAGNOSTIC LOGGING TO BROWSER CONSOLE ---
+            console.group(`%c[DIAGNOSTIC] Alert ID: ${alertId}`, 'color: #00ff41; font-weight: bold; background: #000; padding: 2px 6px;');
+            console.log('Raw Backend Alert:', alert);
+            console.log('AI Pipeline Timeline (from ai.py):', alert.details?.pipeline || 'No pipeline found in alert.details');
+            console.log('Final Mapped eventTimeline:', timeline);
+            console.groupEnd();
+
             const mappedAttack = {
               id: alertId,
               date: dateStr,

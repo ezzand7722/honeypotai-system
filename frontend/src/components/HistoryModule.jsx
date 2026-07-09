@@ -132,7 +132,10 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
             {historyList.map((item) => (
               <div 
                 key={item.id} 
-                onClick={() => setSelectedHistory(item)}
+                onClick={() => {
+                  console.log('%c[HISTORY_SELECT] Selected history record:', 'color: #ffaa00; font-weight: bold;', item);
+                  setSelectedHistory(item);
+                }}
                 style={{
                   border: '1px solid rgba(0, 255, 65, 0.3)',
                   background: 'rgba(0,15,0,0.8)',
