@@ -265,47 +265,53 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                 <h4 style={{ color: '#00ff41', margin: '30px 0 20px 0', borderBottom: '1px solid rgba(0,255,65,0.3)', paddingBottom: '10px' }}>
                   // EVENT_TIMELINE
                 </h4>
-                <div style={{ position: 'relative', paddingLeft: '30px' }}>
-                  {selectedHistory.eventTimeline && selectedHistory.eventTimeline.map((evt, i) => (
-                    <div key={i} style={{ marginBottom: '20px', position: 'relative' }}>
-                      {/* خط vertical */}
-                      {i < selectedHistory.eventTimeline.length - 1 && (
-                        <div style={{
-                          position: 'absolute',
-                          left: '-22px',
-                          top: '24px',
-                          width: '2px',
-                          height: '32px',
-                          background: 'rgba(0,255,65,0.2)'
-                        }}></div>
-                      )}
-                      {/* النقطة */}
-                      <div style={{
-                        position: 'absolute',
-                        left: '-30px',
-                        top: '2px',
-                        width: '16px',
-                        height: '16px',
-                        borderRadius: '50%',
-                        background: evt.status === 'critical' ? '#ff0000' : evt.status === 'warning' ? '#ffaa00' : '#00ff41',
-                        border: '2px solid rgba(0,255,65,0.5)',
-                        boxShadow: evt.status === 'critical' ? '0 0 10px #ff0000' : evt.status === 'warning' ? '0 0 8px #ffaa00' : '0 0 8px #00ff41'
-                      }}></div>
-                      {/* التفاصيل */}
-                      <div style={{ fontSize: '11px', opacity: 0.7, color: '#888' }}>
-                        {evt.time}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0px' }}>
+                  {selectedHistory.eventTimeline && selectedHistory.eventTimeline.length > 0
+                    ? selectedHistory.eventTimeline.map((evt, i) => {
+                        const evtTime = typeof evt === 'string' ? '' : (evt.time || '');
+                        const evtEvent = typeof evt === 'string' ? evt : (evt.event || String(evt));
+                        const evtStatus = typeof evt === 'string' ? 'success' : (evt.status || 'success');
+                        const dotColor = evtStatus === 'critical' ? '#ff0000' : evtStatus === 'warning' ? '#ffaa00' : '#00ff41';
+                        return (
+                          <div key={i} style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', marginBottom: '14px' }}>
+                            {/* Dot + vertical line column */}
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: '16px' }}>
+                              <div style={{
+                                width: '14px', height: '14px', borderRadius: '50%', flexShrink: 0,
+                                background: dotColor,
+                                border: '2px solid rgba(255,255,255,0.2)',
+                                boxShadow: `0 0 8px ${dotColor}`,
+                                marginTop: '2px',
+                              }} />
+                              {i < selectedHistory.eventTimeline.length - 1 && (
+                                <div style={{ width: '2px', flex: 1, minHeight: '16px', background: 'rgba(0,255,65,0.2)', marginTop: '4px' }} />
+                              )}
+                            </div>
+                            {/* Text column */}
+                            <div style={{ flex: 1, paddingBottom: '4px' }}>
+                              {evtTime && (
+                                <div style={{ fontSize: '10px', color: '#888', marginBottom: '2px', letterSpacing: '0.5px' }}>
+                                  {evtTime}
+                                </div>
+                              )}
+                              <div style={{
+                                fontSize: '12px', fontWeight: '600',
+                                color: dotColor,
+                                letterSpacing: '0.3px',
+                                wordBreak: 'break-word',
+                              }}>
+                                {evtEvent}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    : (
+                      <div style={{ color: 'rgba(0,255,65,0.4)', fontSize: '12px', padding: '10px 0', letterSpacing: '1px' }}>
+                        NO_TIMELINE_DATA_AVAILABLE
                       </div>
-                      <div style={{
-                        fontSize: '12px',
-                        fontWeight: '600',
-                        color: evt.status === 'critical' ? '#ff0000' : evt.status === 'warning' ? '#ffaa00' : '#00ff41',
-                        marginTop: '2px',
-                        letterSpacing: '0.5px'
-                      }}>
-                        {evt.event}
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  }
                 </div>
               </div>
 
