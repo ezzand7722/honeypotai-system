@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeypot AI System - Codebase Workflow & Topology Visualizer</title>
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- vis.js CDN for Network Graph -->
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #080a10;
+            --panel-bg: rgba(13, 18, 30, 0.85);
+            --border-color: rgba(0, 242, 254, 0.25);
+            --accent-cyan: #00f2fe;
+            --accent-pink: #ff007f;
+            --accent-green: #39ff14;
+            --accent-purple: #bd00ff;
+            --accent-yellow: #fffb00;
+            --text-main: #f0f3fa;
+            --text-muted: #8a9fc4;
+            --layer-honeypot: #fffb00;
+            --layer-router: #00f2fe;
+            --layer-service: #39ff14;
+            --layer-persistence: #bd00ff;
+            --layer-ai: #ff007f;
+            --layer-frontend: #00bfff;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            scrollbar-width: thin;
+            scrollbar-color: var(--accent-cyan) var(--bg-color);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+        }
+
+        /* Ambient neon glow */
+        body::after {
+            content: '';
+            position: absolute;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(0, 242, 254, 0.15) 0%, transparent 70%);
+            bottom: -50px;
+            right: -50px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        body::before {
+            content: '';
+            position: absolute;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(ff, 0, 127, 0.1) 0%, transparent 70%);
+            top: -100px;
+            left: -100px;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* Sidebar Container */
+        #sidebar {
+            width: 400px;
+            background: var(--panel-bg);
+            border-right: 2px solid var(--border-color);
+            backdrop-filter: blur(15px);
+            z-index: 10;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
+            overflow-y: auto;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: linear-gradient(45deg, var(--accent-cyan), var(--accent-pink));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* Legend Panel */
+        .card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .card h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-cyan);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .legend-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 13px;
+        }
+
+        .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            box-shadow: 0 0 10px currentColor;
+        }
+
+        /* Info Display Card */
+        #info-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .info-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-main);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 8px;
+        }
+
+        .info-meta {
+            font-size: 13px;
+            color: var(--accent-cyan);
+            font-family: 'Fira Code', monospace;
+            word-break: break-all;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 10px;
+            border-radius: 6px;
+        }
+
+        .info-desc {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .info-code {
+            font-family: 'Fira Code', monospace;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 12px;
+            color: #d1f4ff;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        /* Controls / Simulation */
+        .btn-sim {
+            background: linear-gradient(135deg, var(--accent-pink) 0%, #aa00ff 100%);
+            border: none;
+            color: white;
+            padding: 14px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(255, 0, 127, 0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-sim:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 0, 127, 0.5);
+            background: linear-gradient(135deg, #ff2a9b 0%, #bd00ff 100%);
+        }
+
+        .btn-sim:active {
+            transform: translateY(0);
+        }
+
+        /* Interactive Graph Canvas Area */
+        #canvas-container {
+            flex-grow: 1;
+            height: 100%;
+            position: relative;
+            z-index: 2;
+        }
+
+        #network-canvas {
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #0a0e1a 0%, #05060b 100%);
+        }
+
+        /* Workflow steps hud */
+        #hud-workflow {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            max-width: 320px;
+            z-index: 100;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            display: none;
+        }
+
+        .hud-header {
+            font-size: 13px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: var(--accent-pink);
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+
+        .hud-step-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            margin-bottom: 6px;
+        }
+
+        .hud-step-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        .hud-dots {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+        }
+
+        .hud-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .hud-dot.active {
+            background: var(--accent-cyan);
+            box-shadow: 0 0 8px var(--accent-cyan);
+            transform: scale(1.2);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SIDEBAR -->
+    <div id="sidebar">
+        <div class="header">
+            <h1>Honeypot AI System</h1>
+            <p>Codebase Workflow & Topology Visualizer</p>
+        </div>
+
+        <button class="btn-sim" onclick="startWorkflowSimulation()">
+            ⚡ Simulate Ingestion & Analysis Workflow
+        </button>
+
+        <!-- LEGEND CARD -->
+        <div class="card">
+            <h3>🎨 Architectural Layers</h3>
+            <div class="legend-grid">
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-honeypot); background-color: var(--layer-honeypot);"></div>
+                    <span>Honeypot Layer (Simulators)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-router); background-color: var(--layer-router);"></div>
+                    <span>API Router Layer (FastAPI endpoints)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-service); background-color: var(--layer-service);"></div>
+                    <span>Business Logic Layer (Services)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-persistence); background-color: var(--layer-persistence);"></div>
+                    <span>Persistence Layer (SQLite / Supabase)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-ai); background-color: var(--layer-ai);"></div>
+                    <span>AI Engine (Anomaly / Isolation Forest)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="dot" style="color: var(--layer-frontend); background-color: var(--layer-frontend);"></div>
+                    <span>React Frontend Layer (Dashboard HUD)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- INFO CARD -->
+        <div class="card" style="flex-grow: 1; display: flex; flex-direction: column;">
+            <h3>🔍 Component Inspector</h3>
+            <div id="info-panel">
+                <div class="info-title">Click a Node to Inspect</div>
+                <div class="info-desc">Select any file node in the graph network topology on the right to view its structural properties, file location, dependencies, and core operations in real-time.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CANVAS CONTAINER -->
+    <div id="canvas-container">
+        <!-- HUD WORKFLOW OVERLAY -->
+        <div id="hud-workflow">
+            <div class="hud-header">INGESTION & ML SCORE PIPELINE SIMULATOR</div>
+            <div id="hud-step-num" style="font-size: 11px; font-weight: bold; color: var(--accent-pink); margin-bottom: 4px;">STEP 1 OF 7</div>
+            <div class="hud-step-title" id="hud-title">Honeypot Captures Attack</div>
+            <div class="hud-step-desc" id="hud-desc">Decoy IoT device intercepts login anomalies and forwards payload telemetry.</div>
+            <div class="hud-dots" id="hud-dots">
+                <!-- Javascript will generate step dots here -->
+            </div>
+        </div>
+
+        <!-- VIS.JS CANVAS -->
+        <div id="network-canvas"></div>
+    </div>
+
+    <script type="text/javascript">
+        // 1. DATA DEFINITIONS - NODES
+        const nodesData = [
+            // Layer 1: Honeypot Layer (Yellow)
+            { id: 1, label: 'Dahua Simulator', group: 'honeypot', title: 'Honeypot Decoy Sensor mimicking Dahua IoT firmware', desc: 'Simulates low-and-medium interaction firmware. Captures login failures, session connects, and terminal commands and forwards to the API.', file: 'aisystem/dahua_logs.json', methods: 'HTTP JSON Client' },
+            
+            // Layer 2: API Router Layer (Cyan)
+            { id: 2, label: 'app/main.py', group: 'router', title: 'FastAPI Factory Entry Point', desc: 'Creates the core FastAPI application factory. Registers CORS middlewares, mounts sub-routers, initializes database handlers, and configures global exception catch-alls.', file: 'backend/app/main.py', methods: 'create_app()\n@app.exception_handler()' },
+            { id: 3, label: 'routers/honeypot.py', group: 'router', title: 'Honeypot Ingest Endpoints', desc: 'Exposes HTTP routes for telemetry ingestion. Validates requests using custom X-Shared-Secret tokens and splits arrays into asynchronous pipelines.', file: 'backend/app/routers/honeypot.py', methods: 'POST /honeypot/events\nPOST /honeypot/events/batch' },
+            { id: 4, label: 'routers/reporting.py', group: 'router', title: 'Reporting API Provider', desc: 'Provides telemetry APIs for the React frontend, including historical alert paginations, active pipeline progresses, and aggregated stats.', file: 'backend/app/routers/reporting.py', methods: 'GET /report/alerts\nGET /report/pipelines/{pipeline_id}' },
+            { id: 5, label: 'routers/ai_inference.py', group: 'router', title: 'AI Scoring Router', desc: 'Exposes dedicated API routes that allow manual scoring requests to bypass the background pipeline queues.', file: 'backend/app/routers/ai_inference.py', methods: 'POST /ai/score' },
+            { id: 6, label: 'routers/system.py', group: 'router', title: 'System Status Controller', desc: 'Monitors the health, environment setup, database status, and pipeline sizes, providing status feedback to administrators.', file: 'backend/app/routers/system.py', methods: 'GET /system/status' },
+            
+            // Layer 3: Business Logic Layer (Green)
+            { id: 7, label: 'services/ai_client.py', group: 'service', title: 'AI Asynchronous Bridge Client', desc: 'Formats logs, triggers asynchronous batch chunking policies, manages thread-safe log storage with file locks, and executes ai.py via subprocesses.', file: 'backend/app/services/ai_client.py', methods: 'submit_batch_for_scoring()\n_run_ai_script()\n_acquire_lock()' },
+            { id: 8, label: 'services/reporting.py', group: 'service', title: 'Pipeline & Aggregator Logic', desc: 'Maintains running list parameters for active pipelines in memory, tracking events scored, chunks sent, and overall batch status.', file: 'backend/app/services/reporting.py', methods: 'initialize_pipeline()\nattach_prediction()' },
+            { id: 9, label: 'services/persistence.py', group: 'service', title: 'Unified Data Persistence Manager', desc: 'Performs transactional writes and staging for all log types. Supports local SQLite databases or remote PostgreSQL instances on Supabase.', file: 'backend/app/services/persistence.py', methods: 'initialize_database()\npersist_ingested_event()\npersist_ai_result()' },
+            
+            // Layer 4: Persistence Layer (Purple)
+            { id: 10, label: 'SQLite (local.db)', group: 'persistence', title: 'Local SQLite Target Database', desc: 'Stores attack tables locally on embedded networks with sub-millisecond latencies.', file: 'backend/local.db', methods: 'Tables:\n- attack_events\n- event_logs\n- ai_results' },
+            { id: 11, label: 'Postgres (Supabase)', group: 'persistence', title: 'Cloud-Hosted PostgreSQL Database', desc: 'Active globally when DATABASE_URL is set, synchronizing logs across distributed cloud nodes for multi-site visual SIEM audits.', file: 'Supabase Cloud Integration', methods: 'Tables:\n- public.attack_events\n- public.event_logs\n- public.ai_results' },
+            
+            // Layer 5: AI Engine (Red)
+            { id: 12, label: 'aisystem/ai.py', group: 'ai', title: 'AI Event Classifier & Rate Scorer', desc: 'A Python service executing in a subprocess. Aggregates dataframes in Pandas, categorizes threat vectors (DDoS, Brute Force), and scores risk.', file: 'aisystem/ai.py', methods: 'detect_attack_type()\ncalculate_severity()' },
+            { id: 13, label: 'aisystem/ai_old.py', group: 'ai', title: 'Isolation Forest Anomaly Classifier', desc: 'Advanced Machine Learning engine using Scikit-Learn. Extracts 6D vectors per IP and fits an Isolation Forest model to flag anomalous scans.', file: 'aisystem/ai_old.py', methods: 'SKlearn IsolationForest\nFeature Vector Extract' },
+            
+            // Layer 6: React Frontend Layer (Blue-cyan)
+            { id: 14, label: 'React / App.jsx', group: 'frontend', title: 'Frontend Hub Core', desc: 'Bootstraps the BattleStation cyber HUD. Manages global configurations, connects polling jobs, and distributes websocket telemetry.', file: 'frontend/src/App.jsx', methods: 'React 18 state\npollPipelineStatus()' },
+            { id: 15, label: 'components/LiveMap.jsx', group: 'frontend', title: 'Interactive Geolocation SVG Map', desc: 'Paints a glowing dark world map that references geographic coordinate bounds, drawing neon attack streams from threat sources.', file: 'frontend/src/components/LiveMap.jsx', methods: 'D3 Geo / React SVG Map' },
+            { id: 16, label: 'components/AttackOverlay.jsx', group: 'frontend', title: 'KPI Dashboard Stats Module', desc: 'Renders neon overlay grids indicating system averages, threat limits, risk percentages, and blocked telemetry.', file: 'frontend/src/components/AttackOverlay.jsx', methods: 'Real-time Stats Cards' },
+            { id: 17, label: 'components/LiveThreatsModule.jsx', group: 'frontend', title: 'Real-time Event Stream', desc: 'A streaming terminal feed showing live incoming honeypot records with custom danger-color tags and threat tags.', file: 'frontend/src/components/LiveThreatsModule.jsx', methods: 'Scrolling Terminal UI' },
+            { id: 18, label: 'components/GateController.jsx', group: 'frontend', title: 'Orchestrated Firewall Controls', desc: 'Simulates defense feedback loops. Allows administrators to shut down ports, disable tunnels, or block malicious IPs instantly.', file: 'frontend/src/components/GateController.jsx', methods: 'Mitigation Sim toggles' },
+            { id: 19, label: 'components/HistoryModule.jsx', group: 'frontend', title: 'Audit Log Browser & AI Inspector', desc: 'Provides pagination interfaces to scroll through historical databases, exposing specific modals with rich AI analysis writeups.', file: 'frontend/src/components/HistoryModule.jsx', methods: 'Log Explorer / AI Modal view' }
+        ];
+
+        // 2. DATA DEFINITIONS - EDGES (RELATIONSHIPS)
+        const edgesData = [
+            // Honeypot -> Ingest
+            { from: 1, to: 3, label: 'HTTP POST Log', arrows: 'to', color: { color: 'var(--accent-yellow)', highlight: 'white' } },
+            
+            // main.py -> Router Mounts
+            { from: 2, to: 3, label: 'include', arrows: 'to' },
+            { from: 2, to: 4, label: 'include', arrows: 'to' },
+            { from: 2, to: 5, label: 'include', arrows: 'to' },
+            { from: 2, to: 6, label: 'include', arrows: 'to' },
+            
+            // Routers -> Services
+            { from: 3, to: 9, label: 'write raw', arrows: 'to' },
+            { from: 3, to: 7, label: 'async dispatch', arrows: 'to' },
+            { from: 4, to: 8, label: 'read progress', arrows: 'to' },
+            { from: 4, to: 9, label: 'fetch alerts', arrows: 'to' },
+            { from: 5, to: 7, label: 'score request', arrows: 'to' },
+            
+            // Services -> DB Persistence
+            { from: 9, to: 10, label: 'SQLite storage', arrows: 'to' },
+            { from: 9, to: 11, label: 'Supabase storage', arrows: 'to' },
+            
+            // Services -> AI sub-processes
+            { from: 7, to: 12, label: 'subprocess exec', arrows: 'to' },
+            { from: 7, to: 13, label: 'advanced ML ML model', arrows: 'to' },
+            { from: 7, to: 8, label: 'attach prediction', arrows: 'to' },
+            
+            // AI modules writing/reading from persist
+            { from: 12, to: 9, label: 'save scored JSON', arrows: 'to' },
+            { from: 13, to: 9, label: 'write Isolation Forest', arrows: 'to' },
+            
+            // React App -> Routing layer
+            { from: 14, to: 3, label: 'sim trigger', arrows: 'to' },
+            { from: 14, to: 4, label: 'polling api', arrows: 'to' },
+            { from: 14, to: 6, label: 'health monitoring', arrows: 'to' },
+            
+            // App -> Components
+            { from: 14, to: 15, label: 'propagate threats', arrows: 'to' },
+            { from: 14, to: 16, label: 'propagate stats', arrows: 'to' },
+            { from: 14, to: 17, label: 'propagate stream', arrows: 'to' },
+            { from: 14, to: 18, label: 'toggle settings', arrows: 'to' },
+            { from: 14, to: 19, label: 'audit history', arrows: 'to' }
+        ];
+
+        // 3. COLOR PALETTES
+        const groupColors = {
+            honeypot: { background: '#1c1e02', border: 'var(--layer-honeypot)', text: 'white', shadow: 'rgba(255, 251, 0, 0.4)' },
+            router: { background: '#021c1f', border: 'var(--layer-router)', text: 'white', shadow: 'rgba(0, 242, 254, 0.4)' },
+            service: { background: '#021c02', border: 'var(--layer-service)', text: 'white', shadow: 'rgba(57, 255, 20, 0.4)' },
+            persistence: { background: '#14021c', border: 'var(--layer-persistence)', text: 'white', shadow: 'rgba(189, 0, 255, 0.4)' },
+            ai: { background: '#1e020e', border: 'var(--layer-ai)', text: 'white', shadow: 'rgba(255, 0, 127, 0.4)' },
+            frontend: { background: '#02141f', border: 'var(--layer-frontend)', text: 'white', shadow: 'rgba(0, 191, 255, 0.4)' }
+        };
+
+        // 4. GRAPH INITIATION
+        let network;
+        let container = document.getElementById('network-canvas');
+        
+        let formattedNodes = nodesData.map(node => {
+            const colors = groupColors[node.group];
+            return {
+                id: node.id,
+                label: node.label,
+                title: `<b>${node.title}</b><br>${node.desc}`,
+                shape: 'box',
+                borderWidth: 2,
+                borderRadius: 8,
+                margin: 12,
+                font: { face: 'Fira Code', size: 13, color: colors.text },
+                color: {
+                    background: colors.background,
+                    border: colors.border,
+                    highlight: { background: colors.border, border: '#ffffff' }
+                },
+                shadow: { enabled: true, color: colors.shadow, size: 10, x: 0, y: 0 }
+            };
+        });
+
+        let formattedEdges = edgesData.map(edge => {
+            return {
+                from: edge.from,
+                to: edge.to,
+                label: edge.label,
+                arrows: edge.arrows || 'to',
+                font: { face: 'Outfit', size: 10, color: 'var(--text-muted)', strokeWidth: 0, align: 'middle' },
+                color: edge.color || { color: 'rgba(255, 255, 255, 0.12)', highlight: 'var(--accent-cyan)' },
+                width: 1.5,
+                smooth: { type: 'cubicBezier', forceDirection: 'none', roundness: 0.3 }
+            };
+        });
+
+        let data = {
+            nodes: new vis.DataSet(formattedNodes),
+            edges: new vis.DataSet(formattedEdges)
+        };
+
+        let options = {
+            physics: {
+                enabled: true,
+                barnesHut: {
+                    gravitationalConstant: -3500,
+                    centralGravity: 0.3,
+                    springLength: 180,
+                    springConstant: 0.04
+                },
+                stabilization: { iterations: 150 }
+            },
+            interaction: {
+                hover: true,
+                dragNodes: true,
+                zoomView: true,
+                dragView: true
+            }
+        };
+
+        // Initialize vis.js Network
+        network = new vis.Network(container, data, options);
+
+        // 5. SELECTION EVENTS
+        network.on("selectNode", function (params) {
+            const nodeId = params.nodes[0];
+            const nodeInfo = nodesData.find(n => n.id === nodeId);
+            
+            if (nodeInfo) {
+                const infoPanel = document.getElementById('info-panel');
+                const colors = groupColors[nodeInfo.group];
+                
+                infoPanel.innerHTML = `
+                    <div class="info-title" style="color: ${colors.border}">${nodeInfo.label}</div>
+                    <div class="info-meta">📁 PATH: ${nodeInfo.file}</div>
+                    <div class="info-desc"><b>Function / Purpose:</b><br>${nodeInfo.desc}</div>
+                    <div style="font-size: 13px; font-weight: bold; color: var(--accent-cyan);">⚙️ KEY METHODS & CONTEXTS:</div>
+                    <div class="info-code">${nodeInfo.methods}</div>
+                `;
+            }
+        });
+
+        network.on("deselectNode", function () {
+            document.getElementById('info-panel').innerHTML = `
+                <div class="info-title">Click a Node to Inspect</div>
+                <div class="info-desc">Select any file node in the graph network topology on the right to view its structural properties, file location, dependencies, and core operations in real-time.</div>
+            `;
+        });
+
+        // 6. WORKFLOW SIMULATOR ENGINE
+        const workflowSteps = [
+            {
+                step: 1,
+                nodes: [1],
+                title: "1. Honeypot Telemetry Capture",
+                desc: "An attacker scans the network and interacts with the Dahua IP camera honeypot simulator. The honeypot immediately registers log parameters.",
+                highlightEdges: []
+            },
+            {
+                step: 2,
+                nodes: [3],
+                title: "2. API Ingestion Handshake",
+                desc: "The honeypot sends a HTTP batch post request containing logs to routers/honeypot.py, authenticated via the secure X-Shared-Secret header.",
+                highlightEdges: [{ from: 1, to: 3 }]
+            },
+            {
+                step: 3,
+                nodes: [9, 10, 11],
+                title: "3. Logging Database Persistence",
+                desc: "The database persistent router stores incoming telemetry under the 'raw' and 'normalized' logs table within SQLite or Supabase PostgreSQL.",
+                highlightEdges: [{ from: 3, to: 9 }, { from: 9, to: 10 }, { from: 9, to: 11 }]
+            },
+            {
+                step: 4,
+                nodes: [7],
+                title: "4. Asynchronous Queue Splitting",
+                desc: "FastAPI triggers a background queue client inside services/ai_client.py, chunking events (25/batch) and freeing up the HTTP connection for the user.",
+                highlightEdges: [{ from: 3, to: 7 }]
+            },
+            {
+                step: 5,
+                nodes: [12, 13],
+                title: "5. AI Machine Learning Evaluation",
+                desc: "The client acquires a lock file and runs ai.py in a subprocess. The script computes rolling connection rates and fits an Isolation Forest model to isolate high-risk IPs.",
+                highlightEdges: [{ from: 7, to: 12 }, { from: 7, to: 13 }]
+            },
+            {
+                step: 6,
+                nodes: [9, 8],
+                title: "6. Score Attachment & Final Logging",
+                desc: "FastAPI parses the AI's predicted results, links them to original records inside the public.ai_results table, and marks the ingestion pipeline status as completed.",
+                highlightEdges: [{ from: 12, to: 9 }, { from: 13, to: 9 }, { from: 7, to: 8 }]
+            },
+            {
+                step: 7,
+                nodes: [14, 15, 16, 17, 18, 19],
+                title: "7. React 'BattleStation' Renders Live Dashboard",
+                desc: "The React dashboard polls reporting endpoints, maps attacker IPs instantly on the global SVG live threat map, sounds sound notices, and updates status widgets.",
+                highlightEdges: [{ from: 14, to: 4 }, { from: 14, to: 15 }, { from: 14, to: 16 }, { from: 14, to: 17 }, { from: 14, to: 18 }, { from: 14, to: 19 }]
+            }
+        ];
+
+        let simInterval = null;
+        let currentSimStep = 0;
+
+        function startWorkflowSimulation() {
+            if (simInterval) {
+                clearInterval(simInterval);
+                simInterval = null;
+            }
+            
+            // Display HUD
+            const hud = document.getElementById('hud-workflow');
+            hud.style.display = 'block';
+            
+            // Build hud dots
+            const dotsContainer = document.getElementById('hud-dots');
+            dotsContainer.innerHTML = '';
+            workflowSteps.forEach((_, idx) => {
+                const dot = document.createElement('div');
+                dot.className = `hud-dot ${idx === 0 ? 'active' : ''}`;
+                dot.id = `hud-dot-${idx}`;
+                dotsContainer.appendChild(dot);
+            });
+
+            currentSimStep = 0;
+            executeSimStep();
+            
+            simInterval = setInterval(() => {
+                currentSimStep = (currentSimStep + 1) % workflowSteps.length;
+                executeSimStep();
+            }, 5000);
+        }
+
+        function executeSimStep() {
+            const stepData = workflowSteps[currentSimStep];
+            
+            // Update HUD text
+            document.getElementById('hud-step-num').innerText = `STEP ${stepData.step} OF ${workflowSteps.length}`;
+            document.getElementById('hud-title').innerText = stepData.title;
+            document.getElementById('hud-desc').innerText = stepData.desc;
+            
+            // Update HUD dots
+            workflowSteps.forEach((_, idx) => {
+                const d = document.getElementById(`hud-dot-${idx}`);
+                if (d) {
+                    if (idx === currentSimStep) {
+                        d.classList.add('active');
+                    } else {
+                        d.classList.remove('active');
+                    }
+                }
+            });
+
+            // HIGHLIGHT NODES & EDGES IN THE GRAPH
+            // Reset all nodes
+            const allNodeIds = nodesData.map(n => n.id);
+            allNodeIds.forEach(id => {
+                const colors = groupColors[nodesData.find(n => n.id === id).group];
+                data.nodes.update({
+                    id: id,
+                    color: {
+                        background: colors.background,
+                        border: colors.border
+                    },
+                    borderWidth: 2,
+                    shadow: { enabled: true, color: colors.shadow, size: 10 }
+                });
+            });
+
+            // Reset all edges
+            edgesData.forEach((edge, idx) => {
+                data.edges.update({
+                    id: formattedEdges[idx].id,
+                    color: { color: 'rgba(255, 255, 255, 0.12)' },
+                    width: 1.5
+                });
+            });
+
+            // Highlight active nodes in this step
+            stepData.nodes.forEach(id => {
+                const nodeObj = nodesData.find(n => n.id === id);
+                const colors = groupColors[nodeObj.group];
+                data.nodes.update({
+                    id: id,
+                    color: {
+                        background: '#ffffff',
+                        border: 'white'
+                    },
+                    borderWidth: 4,
+                    shadow: { enabled: true, color: colors.border, size: 30 }
+                });
+            });
+
+            // Highlight active edges in this step
+            stepData.highlightEdges.forEach(actEdge => {
+                // Find matching formatted edge index
+                const edgeIndex = edgesData.findIndex(e => e.from === actEdge.from && e.to === actEdge.to);
+                if (edgeIndex !== -1) {
+                    const edgeId = data.edges.getIds()[edgeIndex];
+                    data.edges.update({
+                        id: edgeId,
+                        color: { color: 'var(--accent-cyan)' },
+                        width: 4
+                    });
+                }
+            });
+
+            // Fit the camera perspective on active nodes
+            network.fit({
+                nodes: stepData.nodes,
+                animation: { duration: 1000, easingFunction: 'easeInOutQuad' }
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+[console_scripts]
+cgc = codegraphcontext.cli.main:app
+codegraphcontext = codegraphcontext.cli.main:app

@@ -27,10 +27,7 @@ if [ -d "venv" ]; then
 else
     echo "No venv found in aisystem, skipping pip install"
 fi
-echo "=== Installing frontend dependencies & building ==="
-cd /root/honeypotai-system/frontend
-npm install --legacy-peer-deps --quiet
-npm run build --quiet
+set -e
 
 echo "=== Stopping old backend process ==="
 PIDS=$(pgrep -f "uvicorn" 2>/dev/null || true)

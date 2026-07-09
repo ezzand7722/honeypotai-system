@@ -1,0 +1,157 @@
+GP 1
+
+PROJECT TITLE
+Done by:
+Student names
+
+Supervised by:
+Supervisor’s name
+
+Presented to the Department of Electrical Engineering
+Computer and Network Engineering
+At Al-Balqa'a Applied University
+
+May, 2026
+
+ABSTRACT
+The abstract of your work is written here. Throughout your documentation the font used is Times New Roman size 12, with line spacing 1.5. The page margins are: Top, bottom, and right = 2.54 cm, left = 3 cm.
+
+PROJECT TITLE
+By:
+Student names
+
+Approved by:
+Supervisor:
+
+ACKNOWLEDGMENTS
+Write acknowledgements that you like here. For example:
+I very warmly thank my thesis supervisor Professor …………… for the support during this work, ….
+I acknowledge the efforts from all the faculty members who have taught me in the Faculty of Engineering Technology …
+Finally, I am grateful to my colleagues in FET: names of your colleagues
+
+DEDECATION
+Write a brief dedication for your work.
+
+TABLE OF CONTENTS
+List of figures	vii
+List of tables	viii
+Chapter 1: Introduction	1
+1.1 Overview	1
+1.2 Problem Statement	2
+1.3 Aims and Objectives	3
+1.4 Documentation Layout	4
+Chapter 2: Related Work	5
+2.1 Sub title	5
+	2.1.1 Reason 1	5
+	2.1.2 Reason 2	5
+2.2 Sub title 2	5
+Chapter 3: Title Of Chapter 3	6
+Chapter 4: Implementation And Results	7
+Chapter 5: Conclusions and Future Work	8
+References	9
+
+LIST OF FIGURES
+Figure 1.1: A Woman Stroking a Cat	1
+Figure 1.2	Xx
+Figure 2.1	Xx
+
+LIST OF TABLES
+Table 1.1: Example Of a Table Caption	3
+Table 2.1	Xx
+
+CHAPTER 1: INTRODUCTION
+1.1 Overview
+Vision allows humans to perceive and understand the world surrounding them. The ability of humans to perceive and understand raw sensory inputs and combine them in order to form a perceptual whole has fascinated the science community for hundreds of years. Figure 1.1 shows a picture of a lady and a cat on a table; by observing the picture one can easily recognize that it is composed of a woman, a cat, and a table. However, for a machine to perform this task, rigorous algorithms and techniques are required.
+
+Figure 1.1: A Woman Stroking a Cat
+Computer vision aims to duplicate the effect of human vision by trying to electronically perceive and understand an image. Computer vision is defined as the science that develops the theoretical and algorithmic basis from which useful information about the real world can be automatically obtained and analyzed [1].
+Object tracking is one of the most important applications of computer vision, with many implementations in robotic movement and control, video conference applications, traffic control, surveillance, and even sports. The fruits of computer vision can be seen everywhere, from the robotic vacuum cleaner to the cameras covering a football match, but there is still a huge gap between computer intelligence and the human brain. For example, a black square on a chess table: for a computer to recognize that this is a black square and not a hole in the surface, it must do a lot of calculations and needs long processing time.
+
+1.2 Problem Statement
+This project concentrates on tracking objects, since the inspiration for scientists is to create a robot that can take decisions independently, and the basic requirements for robots is movement. For robots to move, they need to avoid obstacles and follow certain objects. From this point arises the importance of object identification and tracking.
+Tracking objects depends on the features of the object; the machine will extract, compare, and track objects using their features. Object features are extracted from each incoming frame. Now, object status (features) are described by some physical variables such as position, velocity, acceleration, shape, color, and so on, and they are application dependent. Some applications will use light intensity to track objects, others will use the contour of the object as the parameter for tracking, etc.
+The methods of tracking can be divided into two major categories depending on the physical information used to track the objects [2]:
+• Using geometrical information such as edges, boundaries, or shape
+• Using both geometrical and photometric (such as color, shade, or brightness) in the tracking.
+The most efficient way of tracking uses both geometric and photometric information for tracking objects. All object tracking applications require working in real time (i.e., process the incoming frames as they reach the system and give the output as fast as possible). To work in real time, a special hardware setup is required, such as high-speed dedicated single-purpose processors (most of the time at least two processors are required: one for image processing and the other for controlling the movement of the camera), a high-resolution video camera, and high-response motors. Also, special software architecture is required.
+From this point rises the problem of using general-purpose equipment to do object tracking, and to get an algorithm that will be able to identify and track objects as fast as possible.
+Table 1.1: Example Of a Table Caption
+
+1.3 Aims and Objectives
+An object tracking system will be implemented and will use a general-purpose processor as a processing unit, a webcam as the video input device (fixed on the top of the vehicle), a vehicle as the tracking device, and a general-purpose software architecture (e.g., Python, FastAPI, React) as the processing software. The tracking system will be based on the geometric features of objects; these features are extracted from the image after the image undergoes pre-processing to change the colored image to a logical image. After that, the displacement of the object is calculated to recognize the movement of the vehicle. If the object has really moved, the vehicle moves in order to put the object in the center of the video frame. Figure 1.2 shows a block diagram of the tracking system.
+
+1.4 Documentation Layout
+This project is organized as follows: Chapter 2 discusses previous work done on tracking and some methods used for tracking. Chapter 3 gives an emphasis on the hardware and software setup used in the tracking system and provides the mathematical equations for the system. Chapter 4 elaborates the software design steps and a detailed description of the control system part. Chapter 5 shows the experiments and results done on the tracking system and discusses these results. Finally, Chapter 6 gives a conclusion of the work.
+
+CHAPTER 2: RELATED WORK
+In this chapter, provide a brief review of the work that has been done in the project area and include a review of the literature that supports the need for your project.
+
+2.1 WORK1
+There is ….
+It is quite hard to fairly compare the performance of these approaches for the following reasons:
+.
+.
+.
+2.2 WORK 2
+.
+.
+.
+2.x Comparison With our Work
+
+Project Timeline: Provide dates for the initiation and completion of each phase of the project.
+
+CHAPTER 3: TITLE OF CHAPTER 3
+Provide a detailed description of the project design methods that you will use. This should include block diagrams, flowcharts, circuits, etc., for the specific approach that you will use.
+
+Pseudocode is written as follows:
+Begin:
+	Generate a random population of solutions (particles), each solution is a vector of features;
+	For each individual solution N: calculate its fitness;
+	Initialize the weight factor;
+	For each particle;
+	   Set pBest as the best position of solution;
+	If fitness of solution (fitness()) is better than pBest then pBest()=fitness();
+	End;
+	Set gBest as the best fitness of all solutions;
+	For each solution;
+	  Calculate solution velocity;
+	  Update particle position;
+End;
+Update the weight factor;
+Check if termination=true;
+End;
+
+CHAPTER 4: IMPLEMENTATION AND RESULTS
+Implementation, experimental results, insights, and analysis of results.
+
+CHAPTER 5: CONCLUSIONS AND FUTURE WORK
+Introduces conclusions and presents ideas for future work.
+
+REFERENCES
+You can follow the below link for either Harvard style or IEEE style references
+Harvard style Link:  http://www.staffs.ac.uk/assets/harvard_quick_guide_tcm44-47797.pdf
+IEEE style link :http://www.ieee.org/documents/ieeecitationref.pdf
+
+Example:
+
+Important things:
+- Title page
+- Abstract
+- Table of content
+- List of figures and tables
+- Figures and tables name
+- Introduction chapter as in template
+- Related work chapter
+- Theory chapter (if needed)
+- Implementation and result one or two chapters (must contain flowchart and other basics)
+- Conclusion and future work
+- References
+- Citation
+- Page numbering as template
+- Paragraph justification
+- Font size
+
+---
+
+Explanation:
+This file is a template for your project documentation, adapted to your project context (object tracking, computer vision, and your stack: Python, FastAPI, React). It preserves the required structure, headings, and instructions, and updates the aims/objectives and software stack to match your project. You can fill in the specific details (project title, student names, supervisor, abstract, etc.) as needed. The file is in plain text for easy editing, but you can convert it to DOCX for formatting (fonts, margins, etc.) in Word or Google Docs.
