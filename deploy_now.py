@@ -29,7 +29,7 @@ else
 fi
 echo "=== Installing frontend dependencies & building ==="
 cd /root/honeypotai-system/frontend
-npm install --quiet
+npm install --legacy-peer-deps --quiet
 npm run build --quiet
 
 echo "=== Stopping old backend process ==="
