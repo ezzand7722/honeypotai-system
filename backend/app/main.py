@@ -114,6 +114,30 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
+    import os
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    # Resolve frontend/dist directory dynamically relative to this main.py file
+    frontend_dist = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "frontend",
+        "dist"
+    )
+
+    if os.path.exists(frontend_dist):
+        app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+
+        @app.get("/{catchall:path}", tags=["frontend"])
+        async def serve_frontend(catchall: str):
+            # Pass API and Docs requests to their respective handlers
+            if catchall.startswith(("honeypot", "ai", "report", "system", "docs", "redoc", "openapi.json", "health")):
+                raise HTTPException(status_code=404, detail="Not Found")
+            index_path = os.path.join(frontend_dist, "index.html")
+            if os.path.exists(index_path):
+                return FileResponse(index_path)
+            raise HTTPException(status_code=404, detail="Frontend index.html not found")
+
     return app
 
 
