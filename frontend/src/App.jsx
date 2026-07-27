@@ -352,11 +352,12 @@ function App() {
             
             setActiveTestAttack(currTest => {
               if (!currTest || currTest.id === mappedAttack.id) {
-                return mappedAttack;
+                return { ...currTest, ...mappedAttack, startTime: currTest?.startTime, duration: currTest?.duration, progress: currTest?.progress };
               } else {
                 setActiveAttacksWrapper(prev => {
                   const next = prev.filter(a => a.id !== mappedAttack.id);
-                  return [{ ...mappedAttack, timestamp: new Date().toLocaleTimeString() }, ...next];
+                  const existing = prev.find(a => a.id === mappedAttack.id);
+                  return [{ ...existing, ...mappedAttack, timestamp: new Date().toLocaleTimeString(), startTime: existing?.startTime, duration: existing?.duration, progress: existing?.progress }, ...next];
                 });
                 return currTest;
               }
