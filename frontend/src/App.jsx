@@ -339,7 +339,7 @@ function App() {
               }
 
               // Make new backend alerts visible immediately.
-              if (!initialPoll || shouldShowOverlayOnInitial) setShowOverlay(true);
+              if (!initialPoll) setShowOverlay(true);
             }
 
             fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
@@ -370,7 +370,7 @@ function App() {
             }
 
             // Make new backend alerts visible immediately.
-            if (!initialPoll || shouldShowOverlayOnInitial) setShowOverlay(true);
+            if (!initialPoll) setShowOverlay(true);
           });
         }
       } catch (err) {
