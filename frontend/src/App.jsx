@@ -216,34 +216,28 @@ function App() {
         const shouldShowOverlayOnInitial =
           initialPoll &&
           Array.isArray(data?.alerts) &&
-          data.alerts.some(a => {
-            const ra = a?.details?.received_at;
-            const utcRa = ra ? (ra.endsWith('Z') ? ra : ra + 'Z') : '';
-            const ms = utcRa ? Date.parse(utcRa) : NaN;
-            return Number.isFinite(ms) && Math.abs(nowMs - ms) <= 90_000;
-          });
+          data.alerts.length > 0;
 
         if (data.status === "success" && data.alerts && data.alerts.length > 0) {
           data.alerts.forEach(alert => {
-            const alertId = alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
+            const alertId = alert.attack_id || alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
 
-            const receivedAtIso = alert?.details?.received_at;
-            const utcRa = receivedAtIso ? (receivedAtIso.endsWith('Z') ? receivedAtIso : receivedAtIso + 'Z') : '';
-            const receivedAtMs = utcRa ? Date.parse(utcRa) : NaN;
+            const receivedAtRaw = alert.first_seen || alert?.details?.received_at;
+            let receivedAtMs = NaN;
+            let utcRa = '';
+            
+            if (typeof receivedAtRaw === 'number') {
+                receivedAtMs = receivedAtRaw * (receivedAtRaw < 1e12 ? 1000 : 1);
+                utcRa = new Date(receivedAtMs).toISOString();
+            } else if (typeof receivedAtRaw === 'string') {
+                utcRa = receivedAtRaw.endsWith('Z') ? receivedAtRaw : receivedAtRaw + 'Z';
+                receivedAtMs = Date.parse(utcRa);
+            }
             const lastSeenSeconds = Number(alert.last_seen ?? alert.timestamp ?? alert.first_seen ?? 0) || 0;
             const instanceCount = Number(alert.instance_count ?? 0) || 0;
 
-            // Token changes when the backend ingests new events for the same AGG id
-            const token = String(
-              Number.isFinite(receivedAtMs)
-                ? receivedAtMs
-                : (receivedAtIso || '')
-            ) + '|' + String(instanceCount);
-            const prevToken = seenAlertToken.current.get(alertId);
-
-            // Skip duplicates after initial load
-            if (!initialPoll && prevToken === token) return;
-            seenAlertToken.current.set(alertId, token);
+            // We removed the token-duplicate check so that repeated uploads of the exact same test file
+            // will always trigger the active attack sirens on the dashboard instead of being silently ignored.
 
             const dateStr = Number.isFinite(receivedAtMs)
               ? new Date(receivedAtMs).toISOString().replace('T', ' ').split('.')[0]
@@ -254,9 +248,11 @@ function App() {
             const timeline = [];
             const timeStr = dateStr.split(' ')[1] || "00:00:00";
             const targetPort = alert.dest_port || alert.details?.dest_port || "Unknown";
+            
+            const pipelineData = alert.pipeline || alert.details?.pipeline;
 
-            if (alert.details?.pipeline && Array.isArray(alert.details.pipeline) && alert.details.pipeline.length > 0) {
-                alert.details.pipeline.forEach(item => {
+            if (pipelineData && Array.isArray(pipelineData) && pipelineData.length > 0) {
+                pipelineData.forEach(item => {
                     let status = 'success';
                     const eventName = item.event || '';
                     if (eventName.includes('ATTACK') || eventName.includes('ALERT') || eventName.includes('HIGH') || eventName.includes('DETECTED') || eventName.includes('SEVERITY')) {
@@ -323,7 +319,7 @@ function App() {
               livePayload: 'Backend Log',
               detail: JSON.stringify(alert.details || {}),
               last_seen: lastSeenSeconds,
-              received_at: receivedAtIso || null,
+              received_at: utcRa || null,
               instance_count: instanceCount,
               startTime: Date.now(),
               duration: 60000 + Math.random() * 30000,
@@ -331,26 +327,21 @@ function App() {
               eventTimeline: timeline
             };
             
-            const isRecent = Number.isFinite(receivedAtMs) && Math.abs(nowMs - receivedAtMs) <= 90_000;
-            
-            // Only suppress parsing into Active Attacks if it's the very first page load AND the attack is old.
-            // But we always allow it to be pushed if we are live testing (polling)!
-            if (initialPoll && !isRecent) {
-                addToHistory({ ...mappedAttack, status: 'MITIGATED' });
-                fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
-                  if (d?.stats) setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
-                }).catch(()=>{});
-                return;
+            if (!initialPoll) addToHistory(mappedAttack);
+              
+            if (!seenAlertToken.current.has(alertId)) {
+              seenAlertToken.current.set(alertId, true);
+              setLastAttackForAlert(mappedAttack);
+
+              if (!isAttacked) {
+                setIsAttacked(true);
+                setAlarmPlayedForSession(false);
+              }
+
+              // Make new backend alerts visible immediately.
+              if (!initialPoll || shouldShowOverlayOnInitial) setShowOverlay(true);
             }
 
-            setActiveAttacksWrapper(prev => {
-              const next = prev.filter(a => a.id !== mappedAttack.id);
-              return [{ ...mappedAttack, timestamp: new Date().toLocaleTimeString() }, ...next];
-            });
-            if (!initialPoll) addToHistory(mappedAttack);
-            setActiveTestAttack(mappedAttack);
-            setLastAttackForAlert(mappedAttack);
-            
             fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
               if (d?.stats) {
                 setActiveAttacksWrapper(curr => curr.map(a => a.id === mappedAttack.id ? { ...a, ...d.stats } : a));
@@ -358,6 +349,19 @@ function App() {
                 setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
               }
             }).catch(()=>{});
+            
+            setActiveTestAttack(currTest => {
+              if (!currTest || currTest.id === mappedAttack.id) {
+                return mappedAttack;
+              } else {
+                setActiveAttacksWrapper(prev => {
+                  const next = prev.filter(a => a.id !== mappedAttack.id);
+                  return [{ ...mappedAttack, timestamp: new Date().toLocaleTimeString() }, ...next];
+                });
+                return currTest;
+              }
+            });
+
 
             if (!isAttacked) {
               setIsAttacked(true);
@@ -1076,14 +1080,14 @@ function App() {
           )}
 
           {activeModule === 'config' && (
-            <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
+            <div key="config" className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
               <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
               <ConfigModal settings={settings} setSettings={setSettings} activeTab={activeTab} setActiveTab={setActiveTab} />
             </div>
           )}
 
           {activeModule === 'raw_ai' && (
-            <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
+            <div key="raw_ai" className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
               <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
               <RawAIModule />
             </div>
