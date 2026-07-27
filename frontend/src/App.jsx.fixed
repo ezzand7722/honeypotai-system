@@ -11,10 +11,9 @@ import Icons from './components/Icons';
 import Header from './components/Header';
 import ConfigModal from './components/ConfigModal';
 import LiveThreatsModule from './components/LiveThreatsModule';
-import RawAIModule from './components/RawAIModule';
 import { randomItem, generateRandomIP, createTestAttack, createDoubleAttackVectors, createLoopbackAttack } from './components/attackEngine';
 import { sfx } from './logic/SFXEngine';
-import { getActiveAttackCount, getCombinedActiveAttacks, splitPrimaryAndSecondaryAttacks } from './logic/attackState';
+import { getActiveAttackCount, getCombinedActiveAttacks } from './logic/attackState';
 
 import './App.css';
 import { initialHistoryData } from './data/attackData';
@@ -24,7 +23,6 @@ const menuItems = [
   { id: 'network', label: 'NETWORK', Component: Icons.Network },
   { id: 'history', label: 'ATTACK HISTORY', Component: Icons.History },
   { id: 'analysis', label: 'ANALYSIS', Component: Icons.Analysis },
-  { id: 'raw_ai', label: 'RAW AI OUTPUT', Component: Icons.RawData },
   { id: 'config', label: 'SETTINGS', Component: Icons.Config },
 ];
 
@@ -59,21 +57,16 @@ function App() {
   const [showMultiAttackDetail, setShowMultiAttackDetail] = useState(false);
   const [alertSuppressed, setAlertSuppressed] = useState(false);
   const [heuristicProgress, setHeuristicProgress] = useState(0);
-  const [historyList, setHistoryList] = useState(
-    initialHistoryData.filter(item => item.ip !== '127.0.0.1' && item.src_ip !== '127.0.0.1')
-  );
+  const [historyList, setHistoryList] = useState(initialHistoryData);
   const [liveLog, setLiveLog] = useState("SYSTEM_IDLE");
-  const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "â†“ 0.0 KB/s | â†‘ 0.0 KB/s" });
+  const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "↓ 0.0 KB/s | ↑ 0.0 KB/s" });
 
   const [showLoopbackMenu, setShowLoopbackMenu] = useState(false);
-  const [showLoopbackSubMenu, setShowLoopbackSubMenu] = useState(false);
-  const [showMultiCountInput, setShowMultiCountInput] = useState(false);
-  const [multiAttackCount, setMultiAttackCount] = useState('3');
   const [showLogUpload, setShowLogUpload] = useState(false);
-  const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // Ù„ØªØªØ¨Ø¹ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¥Ù†Ø°Ø§Ø±
+  const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // لتتبع آخر هجمة للإنذار
   const [alarmPlayedForSession, setAlarmPlayedForSession] = useState(false); // Ù„Ø¶Ù…Ø§Ù† ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© ÙÙ‚Ø·
   const isSpeaking = useRef(false); // Ù„Ù…Ù†Ø¹ ØªØ´ØºÙŠÙ„ ÙˆØ¸ÙŠÙØªÙŠÙ† Ù†Ø·Ù‚ ÙÙŠ Ù†ÙØ³ Ø§Ù„ÙˆÙ‚Øª
-  const alertShownForAttackIds = useRef(new Set()); // ØªØªØ¨Ø¹ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„ØªÙŠ ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù‡Ø§
+  const alertShownForAttackIds = useRef(new Set()); // تتبع الهجمات التي تم عرض الإنذار لها
 
   const isFinalizing = useRef(false);
   const attackRef = useRef(false);
@@ -115,7 +108,7 @@ function App() {
     // Ø¥Ø°Ø§ Ù„Ù… ÙŠÙˆØ¬Ø¯ Ù‡Ø¬ÙˆÙ… Ø£Ùˆ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‚Ø¯ Ø¹ÙØ±Ø¶ Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù‡Ø°Ù‡ Ø§Ù„Ù‡Ø¬Ù…Ø©ØŒ Ù„Ø§ ØªÙØ¹Ù„ Ø´ÙŠØ¦Ø§Ù‹
     if (!currentAttack || alertShownForAttackIds.current.has(currentAttack.id)) return;
 
-    // ÙˆØ¶Ø¹ Ø¹Ù„Ø§Ù…Ø© Ø¹Ù„Ù‰ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø£Ù†Ù‡ ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù‡Ø§
+    // وضع علامة على الهجمة أنه تم عرض الإنذار لها
     alertShownForAttackIds.current.add(currentAttack.id);
 
     isSpeaking.current = true;
@@ -159,7 +152,7 @@ function App() {
   // --- CONNECT TO REAL BACKEND API ---
   const fetchBackendAlertsRef = useRef(null);
   const seenAlertToken = useRef(new Map());
-  const isFirstPoll = useRef(true); // First poll is silent â€” just records existing IDs
+  const isFirstPoll = useRef(true); // First poll is silent — just records existing IDs
   const alertsFetchInFlight = useRef(false);
   const debugRef = useRef({ lastOkAt: null, lastError: null, lastStatus: null, lastBackendUrl: null, lastAlertsCount: null });
   const loggedBackendConfigRef = useRef(false);
@@ -361,7 +354,7 @@ function App() {
 
             if (!isAttacked) {
               setIsAttacked(true);
-              setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ø¬Ù„Ø³Ø© Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+              setAlarmPlayedForSession(false); // أعد تعيين الإنذار لجلسة الهجمة الجديدة
             }
 
             // Make new backend alerts visible immediately.
@@ -455,9 +448,9 @@ function App() {
         sirenAudio.current.loop = true;
         sirenAudio.current.play().catch(() => { });
       }
-      // ØªØ´ØºÙŠÙ„ Ø§Ù„Ù†Ø·Ù‚
+      // تشغيل النطق
       playFemaleAlert();
-      // ÙˆØ¶Ø¹ Ø¹Ù„Ø§Ù…Ø© Ø¹Ù„Ù‰ Ø£Ù† Ø§Ù„Ø¥Ù†Ø°Ø§Ø± ØªÙ… ØªØ´ØºÙŠÙ„Ù‡
+      // وضع علامة على أن الإنذار تم تشغيله
       setAlarmPlayedForSession(true);
     } else if (!isAttacked) {
       // Ø¥ÙŠÙ‚Ø§Ù ÙƒÙ„ Ø´ÙŠØ¡ Ø¹Ù†Ø¯ Ø§Ù†ØªÙ‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬ÙˆÙ… Ø£Ùˆ ÙƒØªÙ… Ø§Ù„ØµÙˆØª
@@ -491,7 +484,7 @@ function App() {
           setCurrentScreen('attack_details');
         }
 
-        // Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰/Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø© Ø¥Ø°Ø§ Ù„Ù… ÙŠØªÙ… Ø¹Ø±Ø¶Ù‡
+        // عرض الإنذار للهجمة الأولى/الجديدة إذا لم يتم عرضه
         const combinedAttacks = getCombinedActiveAttacks({ activeTestAttack, activeAttacks });
         const firstAttack = combinedAttacks.length > 0 ? combinedAttacks[0] : null;
         if (firstAttack && !firstAttack.alertShown) {
@@ -530,8 +523,8 @@ function App() {
     setShowOverlay(false);
     setActiveTestAttack(null);
     setActiveAttacksWrapper([]);
-    setLastAttackForAlert(null); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
-    setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø¹Ù„Ù… Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù„Ø¬Ù„Ø³Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+    setLastAttackForAlert(null); // أعد تعيين الإنذار
+    setAlarmPlayedForSession(false); // أعد تعيين علم الإنذار للجلسة الجديدة
     setDoubleAttackMode(false);
     setAlertSuppressed(false);
     setSelectedAttackForDetail(null);
@@ -539,7 +532,7 @@ function App() {
     setHeuristicProgress(0);
     setCurrentScreen('main');
     setActiveModule(null);
-    // alertShownForAttackIds.current.clear(); // Ù…Ø³Ø­ Ø³Ø¬Ù„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±Ø§Øª
+    // alertShownForAttackIds.current.clear(); // مسح سجل الإنذارات
     // seenAlertToken.current.clear(); // Disabled to fix loop bug // Allow backend attacks to re-appear after mitigation
 
     setTimeout(() => { isFinalizing.current = false; }, 500);
@@ -551,7 +544,7 @@ function App() {
     const progressInterval = setInterval(() => {
       let hasActiveAttack = false;
 
-      // ØªØ­Ø¯ÙŠØ« progress Ù„Ù„Ù€ activeTestAttack Ø¨Ù†Ø§Ø¡Ù‹ Ø¹Ù„Ù‰ Ø§Ù„ÙˆÙ‚Øª Ø§Ù„Ù…Ù†Ù‚Ø¶ÙŠ ÙˆØ§Ù„Ù…Ø¯Ø© Ø§Ù„Ø¹Ø´ÙˆØ§Ø¦ÙŠØ©
+      // تحديث progress للـ activeTestAttack بناءً على الوقت المنقضي والمدة العشوائية
       if (activeTestAttack) {
         setActiveTestAttack(prev => {
           if (!prev) return null;
@@ -613,7 +606,7 @@ function App() {
         });
       }
 
-      // Ø­Ø³Ø§Ø¨ Ù…ØªÙˆØ³Ø· Ø§Ù„ØªÙ‚Ø¯Ù… Ù„ÙƒÙ„ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª
+      // حساب متوسط التقدم لكل الهجمات
       let totalProgress = 0;
       let attackCount = 0;
       if (activeTestAttack) {
@@ -632,7 +625,7 @@ function App() {
     return () => clearInterval(progressInterval);
   }, [isAttacked, activeTestAttack, activeAttacks, settings.scanSpeed, settings.autoMitigation]);
 
-  // --- ØªØ£Ø«ÙŠØ± Ø¬Ø¯ÙŠØ¯: Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø¹Ù†Ø¯Ù…Ø§ ØªÙ†ØªÙ‡ÙŠ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© ---
+  // --- تأثير جديد: إنهاء الهجمة عندما تنتهي آخر هجمة ---
   useEffect(() => {
     if (!isAttacked) return;
 
@@ -655,14 +648,14 @@ function App() {
     }
   }, [isAttacked, activeTestAttack, activeAttacks, finalizeAttackAndSave]);
 
-  // --- ØªØ£Ø«ÙŠØ± Ø¬Ø¯ÙŠØ¯: Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª ØªÙ„Ù‚Ø§Ø¦ÙŠØ§Ù‹ Ø¨Ø¹Ø¯ Ù…Ø¯Ø© Ù…Ø¹ÙŠÙ†Ø© ---
+  // --- تأثير جديد: إنهاء الهجمات تلقائياً بعد مدة معينة ---
   useEffect(() => {
     if (!isAttacked || activeAttacks.length === 0) return;
 
     const autoRemoveInterval = setInterval(() => {
       setActiveAttacksWrapper(prev => {
         const now = Date.now();
-        // Ù…Ø¯Ø© Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„ÙƒÙ„ Ù‡Ø¬Ù…Ø© (25-35 Ø«Ø§Ù†ÙŠØ©)
+        // مدة الهجمة لكل هجمة (25-35 ثانية)
         const remaining = prev.filter(attack => {
           const attackStartTime = attack.startTime || Date.now();
           const attackDuration = attack.duration || (40000 + Math.random() * 20000);
@@ -694,16 +687,16 @@ function App() {
       const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
       setActiveTestAttack(newAttack);
       setSelectedAttackForDetail(newAttack);
-      setLastAttackForAlert(newAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+      setLastAttackForAlert(newAttack); // حدث الإنذار ليقرأ الهجمة الجديدة
       setActiveAttacksWrapper([]);
       setDoubleAttackMode(false);
       setShowMultiAttackDetail(false);
       setAlertSuppressed(false);
-      setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¹Ù„Ù… Ù„ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+      setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار للهجمة الجديدة
       setHeuristicProgress(0);
       isFinalizing.current = false;
       setCurrentScreen('main');
-      setLiveLog("ðŸ”´ ATTACK_VECTORS_DETECTED");
+      setLiveLog("🔴 ATTACK_VECTORS_DETECTED");
     } else {
       finalizeAttackAndSave();
     }
@@ -714,17 +707,11 @@ function App() {
     if (!isAttacked || settings.shieldActive) return;
     const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
     setActiveAttacksWrapper(prev => [...prev, newAttack]);
-    setLastAttackForAlert(newAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setLastAttackForAlert(newAttack); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
-    setLiveLog(`ðŸ”´ NEW_ATTACK_VECTOR_DETECTED: ${newAttack.type}`);
+    setLiveLog(`🔴 NEW_ATTACK_VECTOR_DETECTED: ${newAttack.type}`);
     // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
-  };
-
-  const normalizeMultiAttackCount = (value) => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 3;
-    return Math.min(10, Math.max(1, Math.floor(parsed)));
   };
 
   const startDoubleAttack = () => {
@@ -735,21 +722,21 @@ function App() {
 
     const [attack1, attack2] = createDoubleAttackVectors();
     const startTime = Date.now();
-    const attackA = { ...attack1, startTime, duration: 40000 + Math.random() * 20000, progress: 0 };
-    const attackB = { ...attack2, startTime, duration: 40000 + Math.random() * 20000, progress: 0 };
     setSelectedAttackForDetail(null);
-    setActiveTestAttack(attackA);
-    setActiveAttacksWrapper([attackB]);
-    setLastAttackForAlert(attackA); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰
+    setActiveAttacksWrapper([
+      { ...attack1, startTime, duration: 40000 + Math.random() * 20000, progress: 0 },
+      { ...attack2, startTime, duration: 40000 + Math.random() * 20000, progress: 0 }
+    ]);
+    setLastAttackForAlert(attack1); // حدث الإنذار ليقرأ الهجمة الأولى
     setDoubleAttackMode(true);
     setIsAttacked(true);
     setShowOverlay(true);
     setAlertSuppressed(false);
-    setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¹Ù„Ù… Ù„ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setHeuristicProgress(0);
     isFinalizing.current = false;
     setCurrentScreen('main');
-    setLiveLog("ðŸ”´ DUAL_VECTOR_ATTACK_INITIATED!");
+    setLiveLog("🔴 DUAL_VECTOR_ATTACK_INITIATED!");
   };
 
   // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© double attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
@@ -757,27 +744,18 @@ function App() {
     if (!isAttacked || settings.shieldActive) return;
     const [attack1, attack2] = createDoubleAttackVectors();
     const now = Date.now();
-    const primaryAttack = activeTestAttack || { ...attack1, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 };
-    const secondaryAttack = { ...attack2, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 };
-    setActiveTestAttack(primaryAttack);
-    setActiveAttacksWrapper(prev => {
-      const next = [...prev];
-      if (primaryAttack && (!activeTestAttack || primaryAttack.id !== activeTestAttack.id)) {
-        next.push(primaryAttack);
-      }
-      next.push(secondaryAttack);
-      return next.filter((attack, index, arr) => attack && arr.findIndex(item => item?.id === attack.id) === index);
-    });
-    setLastAttackForAlert(attack1); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setActiveAttacksWrapper(prev => [...prev, { ...attack1, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 }, { ...attack2, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 }]);
+    setLastAttackForAlert(attack1); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
-    setLiveLog(`ðŸ”´ DUAL_VECTOR_ATTACK_ADDED: ${attack1.type} + ${attack2.type}`);
+    setLiveLog(`🔴 DUAL_VECTOR_ATTACK_ADDED: ${attack1.type} + ${attack2.type}`);
     // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
   };
 
-  const startMultiAttack = (countOverride) => {
+  const startMultiAttack = () => {
     if (settings.shieldActive) { setLiveLog("ERROR: SHIELD_ACTIVE_BLOCKING_TEST"); return; }
-    const count = normalizeMultiAttackCount(countOverride ?? multiAttackCount);
+    const raw = window.prompt('عدد الهجمات المراد تشغيلها (1-10):', '3');
+    const count = Math.min(10, Math.max(1, Number(raw) || 1));
     const startTime = Date.now();
     const newAttacks = [];
     for (let i = 0; i < count; i++) {
@@ -785,25 +763,24 @@ function App() {
       newAttacks.push(a);
     }
 
-    const [primaryAttack, ...secondaryAttacks] = newAttacks;
-    setActiveTestAttack(primaryAttack);
-    setActiveAttacksWrapper(secondaryAttacks);
+    setActiveAttacksWrapper(newAttacks);
     setDoubleAttackMode(false);
     setIsAttacked(true);
     setShowOverlay(true);
     setAlertSuppressed(false);
-    setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¹Ù„Ù… Ù„ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setHeuristicProgress(0);
     isFinalizing.current = false;
     setCurrentScreen('main');
-    setLastAttackForAlert(primaryAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰
-    setLiveLog(`ðŸ”´ MULTI_ATTACKS_INITIATED x${count}`);
+    setLastAttackForAlert(newAttacks[0]); // حدث الإنذار ليقرأ الهجمة الأولى
+    setLiveLog(`🔴 MULTI_ATTACKS_INITIATED x${count}`);
   };
 
   // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© multi attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
-  const addMultiVector = (countOverride) => {
+  const addMultiVector = () => {
     if (!isAttacked || settings.shieldActive) return;
-    const count = normalizeMultiAttackCount(countOverride ?? multiAttackCount);
+    const raw = window.prompt('Ø¹Ø¯Ø¯ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø¥Ø¶Ø§ÙÙŠØ© (1-10):', '3');
+    const count = Math.min(10, Math.max(1, Number(raw) || 1));
     const addStartTime = Date.now();
     const newAttacks = [];
     for (let i = 0; i < count; i++) {
@@ -811,17 +788,11 @@ function App() {
       newAttacks.push(a);
     }
 
-    const [primaryAttack, ...secondaryAttacks] = newAttacks;
-    if (!activeTestAttack) {
-      setActiveTestAttack(primaryAttack);
-      setActiveAttacksWrapper(secondaryAttacks);
-    } else {
-      setActiveAttacksWrapper(prev => [...prev, ...newAttacks]);
-    }
-    setLastAttackForAlert(primaryAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setActiveAttacksWrapper(prev => [...prev, ...newAttacks]);
+    setLastAttackForAlert(newAttacks[0]); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
-    setLiveLog(`ðŸ”´ NEW_ATTACKS_ADDED x${count}`);
+    setLiveLog(`🔴 NEW_ATTACKS_ADDED x${count}`);
     // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
   };
 
@@ -830,12 +801,12 @@ function App() {
     const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
     setActiveTestAttack(lbAttack);
     setSelectedAttackForDetail(lbAttack);
-    setLastAttackForAlert(lbAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+    setLastAttackForAlert(lbAttack); // حدث الإنذار ليقرأ الهجمة الجديدة
     setActiveAttacks([]);
     setDoubleAttackMode(false);
     setShowMultiAttackDetail(false);
     setAlertSuppressed(false);
-    setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¹Ù„Ù… Ù„ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    setAlarmPlayedForSession(false); // أعد تعيين العلم لتشغيل الإنذار
     setIsAttacked(true);
     setShowOverlay(true);
     setShowLoopbackMenu(false);
@@ -849,13 +820,8 @@ function App() {
   const addLoopbackVector = (type) => {
     if (!isAttacked || settings.shieldActive) return;
     const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
-    if (!activeTestAttack) {
-      setActiveTestAttack(lbAttack);
-      setActiveAttacksWrapper([]);
-    } else {
-      setActiveAttacksWrapper(prev => [...prev, lbAttack]);
-    }
-    setLastAttackForAlert(lbAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setActiveAttacksWrapper(prev => [...prev, lbAttack]);
+    setLastAttackForAlert(lbAttack); // تحديث الهجمة للعرض لكن بدون تشغيل إنذار جديد
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`âš ï¸ NEW_LOOPBACK_ADDED: ${lbAttack.type}`);
@@ -865,7 +831,7 @@ function App() {
   const openAttackDetail = (attack) => {
     setSelectedAttackForDetail(attack);
     setActiveTestAttack(attack);
-    setLastAttackForAlert(attack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ IP Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ù…Ø®ØªØ§Ø±Ø©
+    setLastAttackForAlert(attack); // حدث الإنذار ليقرأ IP الهجمة المختارة
     setCurrentScreen('attack_details');
     setActiveModule(null);
     setShowOverlay(true);
@@ -959,7 +925,7 @@ function App() {
 
             {selectedNode && (
               <div className="node-info-overlay" style={{ top: mousePos.y, left: mousePos.x, pointerEvents: 'all' }}>
-                <button className="close-mini" onClick={() => setSelectedNode(null)}>Ã—</button>
+                <button className="close-mini" onClick={() => setSelectedNode(null)}>×</button>
                 <div className="overlay-header">
                   <div className={`pulse-dot ${selectedNode.isAttacker ? 'red' : (isAttacked ? 'red' : 'green')}`}></div>
                   <h4 className="neon-txt">{selectedNode.title}</h4>
@@ -1082,13 +1048,6 @@ function App() {
             </div>
           )}
 
-          {activeModule === 'raw_ai' && (
-            <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
-              <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
-              <RawAIModule />
-            </div>
-          )}
-
           {!activeModule && !showOverlay && (
             <div className="bottom-controls" style={{
               display: 'flex',
@@ -1097,66 +1056,31 @@ function App() {
 
               {showLoopbackMenu && (
                 <div className="loopback-selector-popup">
-                  <div className="popup-tag">// SELECT_ATTACK_VECTOR</div>
-                  <button onClick={() => { setShowLoopbackSubMenu(false); setShowMultiCountInput(false); setShowLoopbackMenu(false); if (isAttacked) { addNewVector(); } else { toggleAttack(); } }}>EXTERNAL_TEST</button>
-                  <button onClick={() => { setShowLoopbackSubMenu(false); setShowMultiCountInput(false); setShowLoopbackMenu(false); if (isAttacked) { addDoubleVector(); } else { startDoubleAttack(); } }}>DUAL_ATTACK</button>
-
-                  <button
-                    onClick={() => {
-                      setShowLoopbackSubMenu(prev => !prev);
-                      setShowMultiCountInput(false);
-                    }}
-                    className="menu-group-btn"
-                  >
-                    LOOPBACK_MODE
-                  </button>
-                  {showLoopbackSubMenu && (
-                    <div className="attack-submenu">
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addLoopbackVector('BRUTE'); } else { startLoopbackAttack('BRUTE'); } }}>01_BRUTE_FORCE</button>
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addLoopbackVector('DDOS'); } else { startLoopbackAttack('DDOS'); } }}>02_DDoS_FLOOD</button>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      setShowMultiCountInput(prev => !prev);
-                      setShowLoopbackSubMenu(false);
-                    }}
-                    className="menu-group-btn"
-                  >
-                    MULTI_ATTACK
-                  </button>
-                  {showMultiCountInput && (
-                    <div className="attack-submenu">
-                      <label className="submenu-label" htmlFor="multi-count">COUNT (1-10)</label>
-                      <input
-                        id="multi-count"
-                        className="attack-count-input"
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={multiAttackCount}
-                        onChange={(e) => setMultiAttackCount(e.target.value)}
-                      />
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addMultiVector(multiAttackCount); } else { startMultiAttack(multiAttackCount); } }}>
-                        APPLY_MULTI
-                      </button>
-                    </div>
-                  )}
-
-                  <button className="cancel-btn" onClick={() => { setShowLoopbackMenu(false); setShowLoopbackSubMenu(false); setShowMultiCountInput(false); }}>CLOSE</button>
+                  <div className="popup-tag">// SELECT_INTERNAL_VECTOR</div>
+                  <button onClick={() => { isAttacked ? addLoopbackVector('BRUTE') : startLoopbackAttack('BRUTE'); setShowLoopbackMenu(false); }}>01_BRUTE_FORCE</button>
+                  <button onClick={() => { isAttacked ? addLoopbackVector('DDOS') : startLoopbackAttack('DDOS'); setShowLoopbackMenu(false); }}>02_DDoS_FLOOD</button>
+                  <button className="cancel-btn" onClick={() => setShowLoopbackMenu(false)}>CLOSE</button>
                 </div>
               )}
 
+              <button onClick={isAttacked ? addNewVector : toggleAttack} className="control-btn-pro">
+                {isAttacked ? "ADD_NEW_VECTOR" : "EXTERNAL_TEST"}
+              </button>
+
               <button
-                onClick={() => {
-                  setShowLoopbackMenu(prev => !prev);
-                  setShowLoopbackSubMenu(false);
-                  setShowMultiCountInput(false);
-                }}
+                onClick={() => setShowLoopbackMenu(!showLoopbackMenu)}
+                disabled={false}
                 className={`control-btn-pro loopback-btn ${showLoopbackMenu ? 'active' : ''}`}
               >
-                ATTACK_TEST
+                LOOPBACK_MODE
+              </button>
+
+              <button onClick={isAttacked ? addDoubleVector : startDoubleAttack} className="control-btn-pro dual-btn" style={{ opacity: 1 }}>
+                {isAttacked ? "ADD_DUAL_VECTOR" : "DUAL_ATTACK"}
+              </button>
+
+              <button onClick={isAttacked ? addMultiVector : startMultiAttack} className="control-btn-pro multi-btn" style={{ opacity: 1 }}>
+                {isAttacked ? "ADD_MULTI_VECTOR" : "MULTI_ATTACK"}
               </button>
 
               {!isAttacked && (
@@ -1185,17 +1109,17 @@ function App() {
             <div className="advanced-detail-overlay">
               <div className="detail-header-pro">
                 <h1>{">>"} ATTACK_VECTOR_ANALYSIS_DETAILED</h1>
-                <button onClick={() => setShowMultiAttackDetail(false)}>Ã—</button>
+                <button onClick={() => setShowMultiAttackDetail(false)}>×</button>
               </div>
               <div className="detail-grid-pro">
                 <div className="threat-section">
-                  <h2>ðŸ”´ THREAT_DETAILS</h2>
+                  <h2>🔴 THREAT_DETAILS</h2>
                   <p><strong>SOURCE_IP:</strong> <span>{selectedAttackForDetail.ip}</span></p>
                   <p><strong>TYPE:</strong> <span>{selectedAttackForDetail.type}</span></p>
                   <p><strong>THREAT:</strong> <span style={{ color: '#ff0000' }}>{selectedAttackForDetail.threat}</span></p>
                 </div>
                 <div className="analysis-section">
-                  <h2>ðŸŸ¢ ANALYSIS_&_METRICS</h2>
+                  <h2>🟢 ANALYSIS_&_METRICS</h2>
                   <div className="risk-bar"><div style={{ width: selectedAttackForDetail.threat }}></div></div>
                   <p><strong>STATUS:</strong> <span>ACTIVE_BLOCKING</span></p>
                 </div>
@@ -1213,14 +1137,10 @@ function App() {
             .pulse-red { animation: pulse-red-anim 1s infinite; }
             @keyframes pulse-red-anim { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
             
-            .loopback-selector-popup { background: rgba(0,0,0,0.95); border: 1px solid #ff00ff; padding: 10px; width: 240px; display: flex; flex-direction: column; gap: 5px; box-shadow: 0 0 30px rgba(255,0,255,0.2); margin-bottom: 5px; }
+            .loopback-selector-popup { background: rgba(0,0,0,0.95); border: 1px solid #ff00ff; padding: 10px; width: 220px; display: flex; flex-direction: column; gap: 5px; box-shadow: 0 0 30px rgba(255,0,255,0.2); margin-bottom: 5px; }
             .popup-tag { font-size: 9px; color: #ff00ff; opacity: 0.6; padding: 5px; border-bottom: 1px solid #ff00ff33; }
             .loopback-selector-popup button { background: transparent; border: 1px solid transparent; color: #ff00ff; padding: 10px; text-align: left; font-family: monospace; cursor: pointer; transition: 0.2s; }
             .loopback-selector-popup button:hover { background: rgba(255,0,255,0.1); border-color: #ff00ff; }
-            .menu-group-btn { font-weight: 700; }
-            .attack-submenu { display: flex; flex-direction: column; gap: 5px; padding: 4px 0 4px 10px; border-left: 1px solid #ff00ff33; }
-            .submenu-label { font-size: 9px; color: #ff00ff; opacity: 0.7; letter-spacing: 1px; }
-            .attack-count-input { background: rgba(255,0,255,0.08); border: 1px solid #ff00ff55; color: #fff; padding: 8px; font-family: monospace; }
             .cancel-btn { color: #666 !important; font-size: 10px !important; text-align: center !important; }
             .loopback-btn { border-color: #ff00ff !important; color: #ff00ff !important; background: transparent !important; }
             .loopback-btn:hover:not(:disabled), .loopback-btn.active { background: #ff00ff !important; color: #000 !important; }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getCombinedActiveAttacks } from '../logic/attackState';
 
 const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serverStats }) => {
   // --- الحالات المحلية للتحكم في العرض الداخلي (بدون حذف) ---
@@ -7,7 +8,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
   // منطق تحديث ذكي: يحافظ على الهجمة التي اختارها المستخدم يدوياً ويحدث بياناتها فقط
   useEffect(() => {
     // تجميع كافة الهجمات المتوفرة حالياً
-    const allAttacks = activeAttacks.length > 0 ? activeAttacks : (activeAttack ? [activeAttack] : []);
+    const allAttacks = getCombinedActiveAttacks({ activeTestAttack: activeAttack, activeAttacks });
     
     if (allAttacks.length === 0) {
       setLocalSelectedAttack(null);
@@ -89,7 +90,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
   };
 
   // تجميع كافة الهجمات المتاحة لعرضها في القائمة اليسرى دائماً
-  const allAvailableAttacks = activeAttacks.length > 0 ? activeAttacks : (activeAttack ? [activeAttack] : []);
+  const allAvailableAttacks = getCombinedActiveAttacks({ activeTestAttack: activeAttack, activeAttacks });
 
   return (
     <div style={{ 

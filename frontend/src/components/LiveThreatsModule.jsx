@@ -1,11 +1,12 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 
 const LiveThreatsModule = ({ 
   isAttacked, 
   doubleAttackMode, 
   activeAttacks, 
   activeTestAttack, 
-  onSelectAttack 
+  onSelectAttack,
+  onOpenMultiDashboard
 }) => {
 
   // تم استخدام useMemo لتوحيد المصفوفة ومنع التكرار اللحظي الذي يسبب تكرار الصوت 
@@ -15,16 +16,25 @@ const LiveThreatsModule = ({
     if (activeAttacks && activeAttacks.length > 0) {
       // نعتمد المصفوفة النشطة لأنها تحتوي بالفعل على كل المتجهات المطلوبة
       attacks.push(...activeAttacks);
-    } else if (activeTestAttack) {
-      // في حالة الهجوم المنفرد فقط نعتمد activeTestAttack
-      attacks.push(activeTestAttack);
+    }
+    if (activeTestAttack) {
+      // أضف activeTestAttack إذا لم يكن موجوداً ضمن activeAttacks
+      if (!attacks.some((a) => a.id === activeTestAttack.id)) {
+        attacks.push(activeTestAttack);
+      }
     }
     return attacks;
   }, [activeAttacks, activeTestAttack]);
 
-  // دالة مساعدة لتحديد الهجوم النشط حالياً للعرض في لوحة التفاصيل
-  // إذا كان هناك هجمات متعددة، عرض الأول
-  const displayAttack = allAttacks.length > 0 ? allAttacks[0] : null;
+  const [selectedAttack, setSelectedAttack] = useState(null);
+
+  useEffect(() => {
+    if (!selectedAttack || !allAttacks.some((attack) => attack.id === selectedAttack.id)) {
+      setSelectedAttack(allAttacks.length > 0 ? allAttacks[0] : null);
+    }
+  }, [allAttacks, selectedAttack]);
+
+  const displayAttack = selectedAttack || (allAttacks.length > 0 ? allAttacks[0] : null);
 
   return (
     <div className="module-content" style={{ 
@@ -49,6 +59,14 @@ const LiveThreatsModule = ({
          <h2 style={{ margin: 0, fontSize: '32px', fontWeight: '900', letterSpacing: '8px' }}>
             ACTIVE_THREAT_MONITOR
          </h2>
+         {allAttacks.length > 1 && onOpenMultiDashboard && (
+           <button
+             onClick={onOpenMultiDashboard}
+             style={{ marginLeft: '20px', padding: '10px 14px', background: 'transparent', color: '#00ff41', border: '1px solid #00ff41', cursor: 'pointer', fontWeight: '700' }}
+           >
+             MULTI DASHBOARD
+           </button>
+         )}
       </div>
 
       {/* التقسيم الشبكي */}
@@ -72,14 +90,16 @@ const LiveThreatsModule = ({
               {[...allAttacks].reverse().map((attack, idx) => (
                 <button 
                   key={attack.id || idx}
-                  onClick={() => onSelectAttack(attack)}
+                  onClick={() => setSelectedAttack(attack)}
                   className="threat-item-btn"
                   style={{
                     padding: '24px 26px',
                     minHeight: '90px',
                     display: 'flex',
                     flexDirection: 'column',
-                    justifyContent: 'center'
+                    justifyContent: 'center',
+                    borderColor: selectedAttack?.id === attack.id ? '#00ff41' : '#ff0000',
+                    background: selectedAttack?.id === attack.id ? 'rgba(0, 255, 65, 0.1)' : 'rgba(255, 0, 0, 0.1)'
                   }}
                 >
                   <div style={{ fontSize: '18px', fontWeight: '900', marginBottom: '10px' }}>

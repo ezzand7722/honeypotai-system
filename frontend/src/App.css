@@ -430,18 +430,18 @@ body {
   position: fixed;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%); 
+  transform: translate(-50%, -50%);
   width: 90vw;
-  height: 85vh; /* تحديد الارتفاع لمنع خروج الكلام */
-  background: rgba(0, 10, 0, 0.95);
+  height: 85vh;
+  background: linear-gradient(135deg, rgba(2, 18, 2, 0.98), rgba(0, 10, 0, 0.95));
   border: 2px solid var(--neon-green);
-  box-shadow: 0 0 30px rgba(0, 255, 0, 0.2);
+  border-radius: 18px;
+  box-shadow: 0 0 35px rgba(0, 255, 0, 0.18);
   z-index: 9999;
   padding: 2rem;
   display: flex;
-  flex-direction: column; /* ترتيب العناصر عمودياً */
-  overflow: hidden; 
-  /* --- تعديل بسيط: تشويش الخلفية لمنع الخريطة من الظهور بشكل مشوه تحت النصوص --- */
+  flex-direction: column;
+  overflow: hidden;
   backdrop-filter: blur(15px);
 }
 
@@ -547,18 +547,28 @@ body {
   position: absolute;
   top: 15px;
   right: 25px;
-  background: rgba(0,0,0,0.8);
+  background: rgba(0, 0, 0, 0.85);
   border: 2px solid var(--neon-green);
+  border-radius: 50%;
   color: var(--neon-green);
-  font-size: 28px;
-  width: 50px;
-  height: 50px;
+  font-size: 24px;
+  width: 48px;
+  height: 48px;
   cursor: pointer !important;
-  z-index: 10050 !important; 
+  z-index: 10050 !important;
   display: flex;
   justify-content: center;
   align-items: center;
   pointer-events: all !important;
+  box-shadow: 0 0 16px rgba(0, 255, 65, 0.16);
+  transition: all 0.25s ease;
+}
+
+.close-btn-lg:hover {
+  background: var(--neon-green);
+  color: #000;
+  transform: rotate(90deg) scale(1.05);
+  box-shadow: 0 0 22px rgba(0, 255, 65, 0.3);
 }
 
 .action-btn {
