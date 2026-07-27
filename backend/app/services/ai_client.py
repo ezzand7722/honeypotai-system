@@ -165,9 +165,11 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     except Exception as e:
         log.error("Failed to read %s: %s", results_file, e)
     finally:
-        # Clean up temp file
+        # Save temp file as the latest ATTACK_RESULTS so the /raw-ai-output API can read it!
         if temp_results_file != ATTACK_RESULTS and os.path.exists(temp_results_file):
             try:
+                import shutil
+                shutil.copy2(temp_results_file, ATTACK_RESULTS)
                 os.remove(temp_results_file)
             except Exception as e:
                 log.debug("Failed to clean up temp file %s: %s", temp_results_file, e)
