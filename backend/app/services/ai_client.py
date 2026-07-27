@@ -78,7 +78,7 @@ def _chunked(items: Sequence, size: int) -> List[Sequence]:
 def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
     formatted: Dict[str, Any] = {}
 
-    formatted["eventid"] = raw_log.get("eventid", "unknown")
+    formatted["eventid"] = raw_log.get("eventid") or (raw_log.get("metadata") or {}).get("eventid") or raw_log.get("attack_vector", "unknown")
     formatted["src_ip"] = raw_log.get("src_ip") or raw_log.get("source_ip") or "127.0.0.1"
     formatted["src_port"] = raw_log.get("src_port")
     formatted["dst_ip"] = raw_log.get("dst_ip", "127.0.0.1")
