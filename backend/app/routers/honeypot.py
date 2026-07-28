@@ -236,6 +236,7 @@ async def ingest_honeypot_events_from_file(
                 pass
 
     try:
+        logger.info("AUTH_CHECK: x_shared_secret=%r settings.honeypot_shared_secret=%r", x_shared_secret, settings.honeypot_shared_secret)
         if x_shared_secret != settings.honeypot_shared_secret:
             raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
