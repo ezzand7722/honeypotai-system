@@ -17,7 +17,7 @@ import { sfx } from './logic/SFXEngine';
 import { getActiveAttackCount, getCombinedActiveAttacks, splitPrimaryAndSecondaryAttacks } from './logic/attackState';
 
 import './App.css';
-import { initialHistoryData } from './data/attackData';
+import { initialHistoryData, GEO_POOL } from './data/attackData';
 
 const menuItems = [
   { id: 'live', label: 'LIVE THREATS', Component: Icons.Live },
@@ -59,21 +59,19 @@ function App() {
   const [showMultiAttackDetail, setShowMultiAttackDetail] = useState(false);
   const [alertSuppressed, setAlertSuppressed] = useState(false);
   const [heuristicProgress, setHeuristicProgress] = useState(0);
-  const [historyList, setHistoryList] = useState(
-    initialHistoryData.filter(item => item.ip !== '127.0.0.1' && item.src_ip !== '127.0.0.1')
-  );
+  const [historyList, setHistoryList] = useState([...initialHistoryData]);
   const [liveLog, setLiveLog] = useState("SYSTEM_IDLE");
-  const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "â†“ 0.0 KB/s | â†‘ 0.0 KB/s" });
+  const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "↓ 0.0 KB/s | ↑ 0.0 KB/s" });
 
   const [showLoopbackMenu, setShowLoopbackMenu] = useState(false);
   const [showLoopbackSubMenu, setShowLoopbackSubMenu] = useState(false);
   const [showMultiCountInput, setShowMultiCountInput] = useState(false);
   const [multiAttackCount, setMultiAttackCount] = useState('3');
   const [showLogUpload, setShowLogUpload] = useState(false);
-  const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // Ù„ØªØªØ¨Ø¹ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¥Ù†Ø°Ø§Ø±
-  const [alarmPlayedForSession, setAlarmPlayedForSession] = useState(false); // Ù„Ø¶Ù…Ø§Ù† ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© ÙÙ‚Ø·
-  const isSpeaking = useRef(false); // Ù„Ù…Ù†Ø¹ ØªØ´ØºÙŠÙ„ ÙˆØ¸ÙŠÙØªÙŠÙ† Ù†Ø·Ù‚ ÙÙŠ Ù†ÙØ³ Ø§Ù„ÙˆÙ‚Øª
-  const alertShownForAttackIds = useRef(new Set()); // ØªØªØ¨Ø¹ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„ØªÙŠ ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù‡Ø§
+  const [lastAttackForAlert, setLastAttackForAlert] = useState(null); // لتتبع آخر هجمة للإندار
+  const [alarmPlayedForSession, setAlarmPlayedForSession] = useState(false); // لضمان تشغيل الإنذار مرة واحدة فقط
+  const isSpeaking = useRef(false); // لمنع تشغيل وظيفتي نطق في نفس الوقت
+  const alertShownForAttackIds = useRef(new Set()); // تتبع الهجمات التي تم عرض الإنذار لها
 
   const isFinalizing = useRef(false);
   const attackRef = useRef(false);
@@ -95,9 +93,10 @@ function App() {
     if (!attack || !attack.id) return;
     setHistoryList(prev => {
       const exists = prev.find(item => item.id === attack.id);
-      if (exists) return prev;
-
-      // Ø§Ù„ØªØ¹Ø¯ÙŠÙ„: Ø§Ù„ØªØ£ÙƒØ¯ Ù…Ù† Ø£Ù† Ø§Ù„Ù‡Ø¬ÙˆÙ… Ø§Ù„Ø¬Ø¯ÙŠØ¯ ÙŠØ¶Ø§Ù ÙÙŠ Ø¨Ø¯Ø§ÙŠØ© Ø§Ù„Ù…ØµÙÙˆÙØ©
+      if (exists) {
+        // Update existing record in place (e.g. status change to MITIGATED)
+        return prev.map(item => item.id === attack.id ? { ...item, ...attack } : item);
+      }
       return [{ ...attack, timestamp: new Date().toLocaleTimeString() }, ...prev];
     });
   }, []);
@@ -159,6 +158,7 @@ function App() {
   // --- CONNECT TO REAL BACKEND API ---
   const fetchBackendAlertsRef = useRef(null);
   const seenAlertToken = useRef(new Map());
+  const discardedAlertIds = useRef(new Set());
   const isFirstPoll = useRef(true); // First poll is silent â€” just records existing IDs
   const alertsFetchInFlight = useRef(false);
   const debugRef = useRef({ lastOkAt: null, lastError: null, lastStatus: null, lastBackendUrl: null, lastAlertsCount: null });
@@ -219,7 +219,12 @@ function App() {
           data.alerts.length > 0;
 
         if (data.status === "success" && data.alerts && data.alerts.length > 0) {
-          data.alerts.forEach(alert => {
+
+            const freshAlerts = data.alerts.filter(alert => { const alertId = alert.attack_id || alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type); return !discardedAlertIds.current.has(alertId); });
+
+            if (freshAlerts.length > 0) {
+
+              freshAlerts.forEach(alert => {
             const alertId = alert.attack_id || alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
 
             const receivedAtRaw = alert.first_seen || alert?.details?.received_at;
@@ -293,6 +298,12 @@ function App() {
             console.log('Final Mapped eventTimeline:', timeline);
             console.groupEnd();
 
+            const seed = alert.src_ip ? alert.src_ip.split(".").reduce((a,b)=>a+(parseInt(b,10)||0),0) : 0;
+            const geo = GEO_POOL[seed % GEO_POOL.length] || { loc: 'Unknown, UN', lat: 0, lng: 0 };
+            const severityVal = alert.details?.severity || alert.severity || 'high';
+            const severityStr = severityVal.toUpperCase();
+
+            const prediction = alert.details?.prediction || {};
             const mappedAttack = {
               id: alertId,
               date: dateStr,
@@ -303,15 +314,12 @@ function App() {
               src_ip: alert.src_ip || 'Unknown',
               port: alert.dest_port || 0,
               proto: alert.protocol || 'TCP',
-              loc: 'Unknown, UN',
-              city: 'Unknown',
-              country: 'UN',
-              threat: '99%',
-              severity: alert.details?.severity || '99%',
-              coords: { 
-                lat: (Math.random() * 100 - 50), 
-                lng: (Math.random() * 200 - 100) 
-              },
+              loc: geo.loc,
+              city: geo.loc.split(',')[0] || 'Unknown',
+              country: geo.loc.split(',')[1]?.trim() || 'UN',
+              threat: severityStr,
+              severity: severityStr,
+              coords: { lat: geo.lat, lng: geo.lng },
               status: 'DETECTED',
               packetSize: '1500 MTU',
               isp: 'Unknown',
@@ -324,56 +332,92 @@ function App() {
               startTime: Date.now(),
               duration: 60000 + Math.random() * 30000,
               progress: 0,
-              eventTimeline: timeline
+              eventTimeline: timeline,
+              connection_count: prediction.connection_count ?? alert.details?.connection_count ?? 0,
+              success_count: prediction.success_count ?? alert.details?.success_count ?? 0,
+              failed_count: prediction.failed_count ?? alert.details?.failed_count ?? 0,
+              unique_passwords: prediction.unique_passwords ?? alert.details?.unique_passwords ?? 0,
+              command_count: prediction.command_count ?? alert.details?.command_count ?? 0,
+              suspicious_commands: prediction.suspicious_commands ?? alert.details?.suspicious_commands ?? 0
             };
             
-            if (!initialPoll) addToHistory(mappedAttack);
+            addToHistory(mappedAttack);
               
-            if (!seenAlertToken.current.has(alertId)) {
+            const isNewAlert = !seenAlertToken.current.has(alertId);
+            
+            if (isNewAlert) {
               seenAlertToken.current.set(alertId, true);
-              setLastAttackForAlert(mappedAttack);
 
+              fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
+                if (d?.stats) {
+                  setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
+                }
+              }).catch(()=>{});
+
+              if (!initialPoll && isNewAlert) {
+                setLastAttackForAlert(mappedAttack);
+              }
+            }
+            
+            // Only treat an alert as ACTIVE if it was ingested within the last 10 minutes.
+            // This prevents old history records loaded from the DB from showing up in the
+            // Analysis tab as live ongoing attacks.
+            const TEN_MINUTES_MS = 10 * 60 * 1000;
+            const isRecentAlert = (receivedAtMs && (nowMs - receivedAtMs) < TEN_MINUTES_MS) ||
+              (!receivedAtMs && isNewAlert); // fallback: if no timestamp, only treat as active if it's brand new
+
+            if (!initialPoll && isRecentAlert && isNewAlert) {
               if (!isAttacked) {
                 setIsAttacked(true);
                 setAlarmPlayedForSession(false);
               }
-
-              // Make new backend alerts visible immediately.
-              if (!initialPoll) setShowOverlay(true);
+              setShowOverlay(true);
             }
 
-            fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
-              if (d?.stats) {
-                setActiveAttacksWrapper(curr => curr.map(a => a.id === mappedAttack.id ? { ...a, ...d.stats } : a));
-                setActiveTestAttack(curr => curr?.id === mappedAttack.id ? { ...curr, ...d.stats } : curr);
-                setHistoryList(curr => curr.map(h => h.id === mappedAttack.id ? { ...h, ...d.stats } : h));
-              }
-            }).catch(()=>{});
-            
-            setActiveTestAttack(currTest => {
-              if (!currTest || currTest.id === mappedAttack.id) {
-                return { ...currTest, ...mappedAttack, startTime: currTest?.startTime, duration: currTest?.duration, progress: currTest?.progress };
-              } else {
-                setActiveAttacksWrapper(prev => {
-                  const next = prev.filter(a => a.id !== mappedAttack.id);
-                  const existing = prev.find(a => a.id === mappedAttack.id);
-                  return [{ ...existing, ...mappedAttack, timestamp: new Date().toLocaleTimeString(), startTime: existing?.startTime, duration: existing?.duration, progress: existing?.progress }, ...next];
-                });
+            if (!initialPoll && isRecentAlert && !discardedAlertIds.current.has(alertId)) {
+              setActiveTestAttack(currTest => {
+                const isCurrentlyActive = (currTest && currTest.id === alertId) || activeAttacks.some(a => a.id === alertId);
+                
+                if (isNewAlert || isCurrentlyActive) {
+                  // Fetch stats and update active lists
+                  fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
+                    if (d?.stats) {
+                      setActiveAttacksWrapper(curr => curr.map(a => a.id === mappedAttack.id ? { ...a, ...d.stats } : a));
+                      setActiveTestAttack(currT => currT?.id === mappedAttack.id ? { ...currT, ...d.stats } : currT);
+                    }
+                  }).catch(()=>{});
+
+                  if (!currTest || currTest.id === mappedAttack.id) {
+                    return { 
+                      ...mappedAttack, 
+                      ...(currTest || {}), 
+                      startTime: currTest?.startTime ?? mappedAttack.startTime, 
+                      duration: currTest?.duration ?? mappedAttack.duration, 
+                      progress: currTest?.progress ?? mappedAttack.progress 
+                    };
+                  } else {
+                    setActiveAttacksWrapper(prev => {
+                      const next = prev.filter(a => a.id !== mappedAttack.id);
+                      const existing = prev.find(a => a.id === mappedAttack.id);
+                      return [{ 
+                        ...mappedAttack, 
+                        ...(existing || {}), 
+                        timestamp: new Date().toLocaleTimeString(), 
+                        startTime: existing?.startTime ?? mappedAttack.startTime, 
+                        duration: existing?.duration ?? mappedAttack.duration, 
+                        progress: existing?.progress ?? mappedAttack.progress 
+                      }, ...next];
+                    });
+                    return currTest;
+                  }
+                }
                 return currTest;
-              }
-            });
-
-
-            if (!isAttacked) {
-              setIsAttacked(true);
-              setAlarmPlayedForSession(false); // Ø£Ø¹Ø¯ ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ø¬Ù„Ø³Ø© Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+              });
             }
-
-            // Make new backend alerts visible immediately.
-            if (!initialPoll) setShowOverlay(true);
           });
         }
-      } catch (err) {
+      }
+    } catch (err) {
         const msg = `[honeypot] alerts fetch exception: ${err?.message || String(err)}`;
         debugRef.current.lastError = msg;
         try {
@@ -413,8 +457,8 @@ function App() {
       if (fetchBackendAlertsRef.current) fetchBackendAlertsRef.current();
     }
     fetchWrapper();
-    // Faster polling so replayed logs show up quickly.
-    const interval = setInterval(fetchWrapper, 250);
+    // Optimized polling interval to prevent server/proxy overload
+    const interval = setInterval(fetchWrapper, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -521,9 +565,13 @@ function App() {
     const savedAttacks = [];
     // Ø§Ø­ÙØ¸ Ø¬Ù…ÙŠØ¹ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ù†Ø´Ø·Ø© (Ø³ÙˆØ§Ø¡ ÙƒØ§Ù†Øª Ù…Ù† activeAttacks Ø£Ùˆ activeTestAttack)
     if (activeAttacks.length > 0) {
-      activeAttacks.forEach(attack => savedAttacks.push({ ...attack, status: 'MITIGATED' }));
+      activeAttacks.forEach(attack => {
+        discardedAlertIds.current.add(attack.id);
+        savedAttacks.push({ ...attack, status: 'MITIGATED' });
+      });
     }
     if (activeTestAttack && !activeAttacks.some(a => a.id === activeTestAttack.id)) {
+      discardedAlertIds.current.add(activeTestAttack.id);
       savedAttacks.push({ ...activeTestAttack, status: 'MITIGATED' });
     }
 
@@ -608,6 +656,9 @@ function App() {
 
           const remaining = updated.filter(attack => {
             if ((attack.progress || 0) >= 100) {
+
+                discardedAlertIds.current.add(attack.id);
+
               addToHistory({ ...attack, status: 'MITIGATED' });
               return false;
             }
@@ -632,7 +683,7 @@ function App() {
 
       const avgProgress = attackCount > 0 ? totalProgress / attackCount : 0;
       setHeuristicProgress(avgProgress);
-    }, 500);
+    }, 100);
 
     return () => clearInterval(progressInterval);
   }, [isAttacked, activeTestAttack, activeAttacks, settings.scanSpeed, settings.autoMitigation]);
@@ -956,6 +1007,7 @@ function App() {
             <div className="scanline"></div>
             <LiveMap
               isAttacked={isAttacked && currentScreen === 'main'}
+              attackerData={activeTestAttack}
               attackerCoords={activeTestAttack?.coords}
               activeAttacks={activeAttacks}
               onNodeClick={handleNodeClick}
@@ -998,7 +1050,7 @@ function App() {
             )}
           </main>
 
-          <Header settings={settings} isAttacked={isAttacked} time={time} liveLog={liveLog} />
+          <Header settings={settings} isAttacked={isAttacked} time={time} liveLog={liveLog} onEndAttack={finalizeAttackAndSave} />
 
           <nav className="side-nav-large" style={{ zIndex: 200000, pointerEvents: 'all', position: 'fixed' }}>
             <div className="nav-items-wrapper">
@@ -1038,6 +1090,7 @@ function App() {
               heuristicProgress={heuristicProgress}
               lastAttackForAlert={lastAttackForAlert}
               toggleAttack={toggleAttack}
+              onEndAttack={finalizeAttackAndSave}
               onDetailView={openAttackDetail}
               onCloseOverlay={closeOverlay}
               onHideOverlay={hideOverlay}
@@ -1055,6 +1108,7 @@ function App() {
                 activeTestAttack={activeTestAttack}
                 onSelectAttack={openAttackDetail}
                 onOpenMultiDashboard={() => { setShowOverlay(true); setCurrentScreen('double_attack'); }}
+                onEndAttack={finalizeAttackAndSave}
               />
             </div>
           )}
@@ -1069,14 +1123,14 @@ function App() {
           {activeModule === 'history' && (
             <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all', background: '#020b02' }}>
               <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
-              <HistoryModule historyList={historyList} onClearHistory={() => setHistoryList([])} />
+              <HistoryModule historyList={historyList} onClearHistory={() => { historyList.forEach(a => discardedAlertIds.current.add(a.id)); setHistoryList([]); }} />
             </div>
           )}
 
           {activeModule === 'analysis' && (
             <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all' }}>
               <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
-              <AnalysisScreen onClose={() => setActiveModule(null)} isAttacked={isAttacked} activeAttack={activeTestAttack || (historyList.length > 0 ? historyList[0] : null)} activeAttacks={activeAttacks} settings={settings} />
+              <AnalysisScreen onClose={() => setActiveModule(null)} isAttacked={isAttacked} activeAttack={activeTestAttack || null} activeAttacks={activeAttacks} settings={settings} />
             </div>
           )}
 
@@ -1099,6 +1153,16 @@ function App() {
               display: 'flex',
               zIndex: 100005, pointerEvents: 'all', position: 'fixed', bottom: '40px', right: '40px', gap: '15px', flexDirection: 'column', alignItems: 'flex-end'
             }}>
+
+              {isAttacked && (
+                <button
+                  onClick={finalizeAttackAndSave}
+                  className="control-btn-pro"
+                  style={{ background: '#ff0000', borderColor: '#ff0000', color: '#ffffff', boxShadow: '0 0 20px rgba(255,0,0,0.8)', width: '220px', fontWeight: '900' }}
+                >
+                  🛑 END ATTACK NOW
+                </button>
+              )}
 
               {showLoopbackMenu && (
                 <div className="loopback-selector-popup">
