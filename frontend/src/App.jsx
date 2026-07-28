@@ -359,11 +359,11 @@ function App() {
               }
             }
             
-            // Only treat an alert as ACTIVE if it was ingested within the last 10 minutes.
+            // Only treat an alert as ACTIVE if it was ingested within the last 30 seconds.
             // This prevents old history records loaded from the DB from showing up in the
             // Analysis tab as live ongoing attacks.
-            const TEN_MINUTES_MS = 10 * 60 * 1000;
-            const isRecentAlert = (receivedAtMs && (nowMs - receivedAtMs) < TEN_MINUTES_MS) ||
+            const RECENT_WINDOW_MS = 30 * 1000;
+            const isRecentAlert = (receivedAtMs && (nowMs - receivedAtMs) < RECENT_WINDOW_MS) ||
               (!receivedAtMs && isNewAlert); // fallback: if no timestamp, only treat as active if it's brand new
 
             if (!initialPoll && isRecentAlert && isNewAlert) {
