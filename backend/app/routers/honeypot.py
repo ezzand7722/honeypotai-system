@@ -236,7 +236,7 @@ async def ingest_honeypot_events_from_file(
                 pass
 
     try:
-        logger.info("AUTH_CHECK: x_shared_secret=%r settings.honeypot_shared_secret=%r", x_shared_secret, settings.honeypot_shared_secret)
+        logger.info("AUTH_CHECK: x_shared_secret=%r settings.honeypot_shared_secret=%r equal=%r", x_shared_secret, settings.honeypot_shared_secret, x_shared_secret == settings.honeypot_shared_secret)
         if x_shared_secret != settings.honeypot_shared_secret:
             raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
@@ -266,7 +266,8 @@ async def ingest_honeypot_events_from_file(
             "pipeline_id": pipeline_id,
             "source_file": file_path,
         }
-    except HTTPException:
+    except HTTPException as e:
+        logger.error("HTTP_EXCEPTION_RAISED status=%s detail=%s", e.status_code, e.detail)
         raise
     except Exception as e:
         logger.error("UNEXPECTED_ERROR error=%s", e, exc_info=True)
