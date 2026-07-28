@@ -59,7 +59,7 @@ function App() {
   const [showMultiAttackDetail, setShowMultiAttackDetail] = useState(false);
   const [alertSuppressed, setAlertSuppressed] = useState(false);
   const [heuristicProgress, setHeuristicProgress] = useState(0);
-  const [historyList, setHistoryList] = useState([...initialHistoryData]);
+  const [historyList, setHistoryList] = useState([]);
   const [liveLog, setLiveLog] = useState("SYSTEM_IDLE");
   const [serverStats, setServerStats] = useState({ cpu: "0%", ram: "0 GB / 8GB", network: "↓ 0.0 KB/s | ↑ 0.0 KB/s" });
 
