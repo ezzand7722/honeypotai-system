@@ -20,6 +20,12 @@ settings = get_settings()
 def create_app() -> FastAPI:
     app = FastAPI(title="Honeypot AI Security Detection System")
     initialize_database()
+    
+    try:
+        from app.services.reporting import load_historical_alerts
+        load_historical_alerts()
+    except Exception as e:
+        logger.error(f"Failed to load historical alerts on start: {e}")
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

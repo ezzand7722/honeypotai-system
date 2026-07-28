@@ -304,3 +304,54 @@ def attacker_stats(src_ip: Union[str, IPvAnyAddress]) -> Dict[str, Any]:
             "events_considered": connection_count,
         },
     }
+
+
+def load_historical_alerts() -> None:
+    """Restores the persisted SQLite/Postgres events into the in-memory _store deque on startup."""
+    from dateutil.parser import parse
+    from app.services.persistence import load_all_events
+    from app.schemas.event import EnrichedEvent, AiPrediction
+
+    try:
+        events_data = load_all_events()
+        with _lock:
+            # Clear current store in case we're restarting/re-initializing
+            _store.clear()
+            
+            # Since load_all_events returns rows ordered by created_at DESC (newest first),
+            # we iterate in reverse order (oldest first) and use appendleft so that
+            # the final _store order has the newest alert on the left (at index 0).
+            for item in reversed(events_data):
+                try:
+                    received_at = item["created_at"]
+                    if isinstance(received_at, str):
+                        try:
+                            received_at = parse(received_at)
+                        except Exception:
+                            received_at = datetime.utcnow()
+                    elif not isinstance(received_at, datetime):
+                        received_at = datetime.utcnow()
+
+                    event_payload = item["event_payload"]
+                    if not event_payload:
+                        continue
+
+                    event = EnrichedEvent.model_validate(event_payload)
+                    prediction = None
+                    if item["prediction_payload"]:
+                        prediction = AiPrediction.model_validate(item["prediction_payload"])
+
+                    _store.appendleft(
+                        {
+                            "event": event,
+                            "prediction": prediction,
+                            "received_at": received_at,
+                            "pipeline_id": item["pipeline_id"],
+                            "chunk_index": item["chunk_index"],
+                        }
+                    )
+                except Exception as inner_ex:
+                    print(f"[restore] Failed to validate inner event: {inner_ex}")
+            print(f"[restore] Successfully loaded {len(_store)} historical events into in-memory store.")
+    except Exception as ex:
+        print(f"[restore] Global error restoring historical events: {ex}")

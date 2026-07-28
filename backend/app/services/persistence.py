@@ -439,3 +439,67 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+def load_all_events() -> list[dict[str, Any]]:
+    results = []
+    if _use_postgres():
+        with _lock:
+            conn = _connect_postgres()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT ae.event_id, ae.pipeline_id, ae.chunk_index, ae.created_at,
+                               el.payload as event_payload, ar.prediction_payload
+                        FROM public.attack_events ae
+                        LEFT JOIN public.event_logs el ON ae.event_id = el.event_id AND el.stage = 'normalized'
+                        LEFT JOIN public.ai_results ar ON ae.event_id = ar.event_id
+                        ORDER BY ae.created_at DESC
+                        LIMIT 200
+                        """
+                    )
+                    rows = cur.fetchall()
+                    for row in rows:
+                        event_id, pipeline_id, chunk_index, created_at, event_payload, prediction_payload = row
+                        results.append({
+                            "event_id": event_id,
+                            "pipeline_id": pipeline_id,
+                            "chunk_index": chunk_index,
+                            "created_at": created_at,
+                            "event_payload": event_payload,
+                            "prediction_payload": prediction_payload
+                        })
+            except Exception as e:
+                log.error("Failed to load events from Postgres: %s", e)
+            finally:
+                conn.close()
+    else:
+        with _lock:
+            conn = _connect()
+            try:
+                cursor = conn.execute(
+                    """
+                    SELECT ae.event_id, ae.pipeline_id, ae.chunk_index, ae.created_at,
+                           el.payload as event_payload, ar.prediction_payload
+                    FROM attack_events ae
+                    LEFT JOIN event_logs el ON ae.event_id = el.event_id AND el.stage = 'normalized'
+                    LEFT JOIN ai_results ar ON ae.event_id = ar.event_id
+                    ORDER BY ae.created_at DESC
+                    LIMIT 200
+                    """
+                )
+                for row in cursor.fetchall():
+                    results.append({
+                        "event_id": row["event_id"],
+                        "pipeline_id": row["pipeline_id"],
+                        "chunk_index": row["chunk_index"],
+                        "created_at": row["created_at"],
+                        "event_payload": json.loads(row["event_payload"]) if row["event_payload"] else None,
+                        "prediction_payload": json.loads(row["prediction_payload"]) if row["prediction_payload"] else None
+                    })
+            except Exception as e:
+                log.error("Failed to load events from SQLite: %s", e)
+            finally:
+                conn.close()
+    return results
