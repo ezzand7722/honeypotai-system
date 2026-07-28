@@ -1,101 +1,119 @@
 import json
-from datetime import datetime, timedelta
-import pandas as pd
 import os
+from collections import defaultdict
+from datetime import datetime, timedelta
 
 INPUT_FILE = "dahua_logs_multi.json"
 OUTPUT_FILE = os.environ.get("ATTACK_RESULTS_FILE", "attack_results.json")
 
-rows = []
-with open(INPUT_FILE, "r", encoding="utf-8", errors="ignore") as f:
-    for line in f:
-        line = line.strip()
-        if not line or not line.startswith("{"):
-            continue
-        try:
-            rows.append(json.loads(line))
-        except:
-            continue
-
-data = pd.DataFrame(rows)
-if data.empty:
-    print("No logs found.")
-    exit()
-
-cols_to_keep = ["src_ip", "eventid", "timestamp", "username", "password", "input", "protocol"]
-for col in cols_to_keep:
-    if col not in data.columns:
-        data[col] = ""
-
-data = data[cols_to_keep]
-data = data.fillna("")
-data = data.drop_duplicates()
-data["timestamp"] = pd.to_datetime(data["timestamp"], errors="coerce")
-
-
-def detect_attack_type(row):
-    event = str(row["eventid"])
+def detect_attack_type(eventid):
+    event = str(eventid)
     if "login.failed" in event or "login.success" in event:
         return "Brute Force"
     if "session.connect" in event:
         return "DDoS"
     return "Unknown"
 
+rows = []
+try:
+    with open(INPUT_FILE, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or not line.startswith("{"): continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+except FileNotFoundError:
+    pass
 
-data["attack_type"] = data.apply(detect_attack_type, axis=1)
-data = data[data["attack_type"] != "Unknown"]
+if not rows:
+    print("No logs found.")
+    exit()
 
-grouped = data.groupby(["src_ip", "attack_type"]).agg(
-    instance_count=("eventid", "count"),
-    first_seen=("timestamp", "min"),
-    last_seen=("timestamp", "max")
-).reset_index()
+# Deduplicate rows by taking the first seen for identical string representations
+seen_rows = set()
+unique_rows = []
+for row in rows:
+    cols_to_keep = ["src_ip", "eventid", "timestamp", "username", "password", "input", "protocol"]
+    filtered_row = {col: row.get(col, "") for col in cols_to_keep}
+    
+    row_str = json.dumps(filtered_row, sort_keys=True)
+    if row_str not in seen_rows:
+        seen_rows.add(row_str)
+        unique_rows.append(filtered_row)
 
-grouped["time_frame_minutes"] = (
-    grouped["last_seen"] - grouped["first_seen"]
-).dt.total_seconds() / 60
+# Group by src_ip and attack_type
+groups = defaultdict(lambda: {"instance_count": 0, "first_seen": None, "last_seen": None})
 
+for row in unique_rows:
+    attack_type = detect_attack_type(row["eventid"])
+    if attack_type == "Unknown": continue
+    
+    src_ip = row["src_ip"]
+    ts_str = row["timestamp"]
+    if not ts_str: continue
+    
+    # Simple parse attempt
+    try:
+        ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+    except Exception:
+        try:
+            ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+            
+    group = groups[(src_ip, attack_type)]
+    group["instance_count"] += 1
+    if group["first_seen"] is None or ts < group["first_seen"]:
+        group["first_seen"] = ts
+    if group["last_seen"] is None or ts > group["last_seen"]:
+        group["last_seen"] = ts
 
-def calculate_severity(row):
-    count = row["instance_count"]
-    minutes = row["time_frame_minutes"]
-    if minutes <= 0:
-        minutes = 1
+grouped_results = []
+for (src_ip, attack_type), stats in groups.items():
+    if stats["first_seen"] is None or stats["last_seen"] is None:
+        continue
+    
+    time_frame_minutes = (stats["last_seen"] - stats["first_seen"]).total_seconds() / 60
+    
+    count = stats["instance_count"]
+    minutes = time_frame_minutes if time_frame_minutes > 0 else 1
     rate = count / minutes
+    
     if count >= 10 or rate >= 5:
-        return "High"
+        severity = "High"
     elif count >= 5 or rate >= 2:
-        return "Medium"
+        severity = "Medium"
     else:
-        return "Low"
+        severity = "Low"
+        
+    grouped_results.append({
+        "attack_id": "", # filled later
+        "src_ip": src_ip,
+        "attack": "Attack",
+        "attack_type": attack_type,
+        "severity": severity,
+        "instance_count": count,
+        "first_seen": stats["first_seen"].isoformat(),
+        "last_seen": stats["last_seen"].isoformat(),
+        "time_frame_minutes": time_frame_minutes,
+        "detection_time": "", # filled later
+        "status": "Detected"
+    })
 
-
-grouped["severity"] = grouped.apply(calculate_severity, axis=1)
-grouped["attack"] = "Attack"
-grouped["status"] = "Detected"
-
-# ---------------------------------------------------------------------------
-# Pipeline / processing trail generation
-# ---------------------------------------------------------------------------
-# Each detected attack gets its own simulated processing timeline, matching
-# the stage sequence and second-by-second cadence used on the dashboard:
-#   LOG_RECEIVED -> DATA_CLEANED -> FEATURES_EXTRACTED -> AI_ANALYSIS_STARTED
-#   -> ATTACK_DETECTED -> SEVERITY_ASSIGNED -> RESULT_SENT
-#
-# Stage offsets (seconds added *before* that stage's timestamp is recorded):
+# Pipeline generation
 STAGE_OFFSETS = [
     ("LOG_RECEIVED", "Logs received from Honeypot", 0),
     ("DATA_CLEANED", "Invalid records removed", 1),
     ("FEATURES_EXTRACTED", "Features generated", 0),
     ("AI_ANALYSIS_STARTED", "Attack analysis started", 1),
-    ("ATTACK_DETECTED", None, 0),          # message filled in per-row below
-    ("SEVERITY_ASSIGNED", None, 0),        # message filled in per-row below
+    ("ATTACK_DETECTED", None, 0),
+    ("SEVERITY_ASSIGNED", None, 0),
     ("RESULT_SENT", "Dashboard updated", 1),
 ]
 
-
 def build_pipeline(start_time, attack_type, severity):
-    """Return (pipeline_list, detection_time_str) for one attack row."""
     pipeline = []
     t = start_time
     detection_time_str = None
@@ -113,46 +131,21 @@ def build_pipeline(start_time, attack_type, severity):
         })
     return pipeline, detection_time_str
 
-
-# One shared "run" start time so all attacks in this batch look like they
-# came from the same processing pass (bump by a couple seconds per row so
-# timestamps don't collide if you show them all at once).
 run_start = datetime.now()
 
-attack_ids = []
-detection_times = []
-pipelines = []
-
-for i, row in grouped.reset_index(drop=True).iterrows():
+for i, row in enumerate(grouped_results):
     row_start = run_start + timedelta(seconds=i * 2)
     pipeline, detection_time = build_pipeline(row_start, row["attack_type"], row["severity"])
-    attack_ids.append(f"ATT-{i + 1:03d}")
-    detection_times.append(detection_time)
-    pipelines.append(pipeline)
+    
+    row["attack_id"] = f"ATT-{i + 1:03d}"
+    row["detection_time"] = detection_time
+    row["pipeline"] = pipeline
 
-grouped["attack_id"] = attack_ids
-grouped["detection_time"] = detection_times
-grouped["pipeline"] = pipelines
-
-grouped = grouped[
-    [
-        "attack_id",
-        "src_ip",
-        "attack",
-        "attack_type",
-        "severity",
-        "instance_count",
-        "first_seen",
-        "last_seen",
-        "time_frame_minutes",
-        "detection_time",
-        "status",
-        "pipeline",
-    ]
-]
-
-grouped.to_json(OUTPUT_FILE, orient="records", indent=2, date_format="iso")
+with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+    json.dump(grouped_results, f, indent=2)
 
 print("=== ACCUMULATED ATTACK RESULTS ===")
-print(grouped.drop(columns=["pipeline"]))
-print("Saved to attack_results.json")
+for r in grouped_results:
+    display_row = {k: v for k, v in r.items() if k != "pipeline"}
+    print(display_row)
+print("Saved to", OUTPUT_FILE)
