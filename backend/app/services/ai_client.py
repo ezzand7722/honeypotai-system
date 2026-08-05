@@ -67,7 +67,10 @@ def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
     formatted: Dict[str, Any] = {}
 
     formatted["eventid"] = raw_log.get("eventid") or (raw_log.get("metadata") or {}).get("eventid") or raw_log.get("attack_vector", "unknown")
-    formatted["src_ip"] = raw_log.get("src_ip") or raw_log.get("source_ip") or "127.0.0.1"
+    import re
+    ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(raw_log))
+    extracted_ip = ip_match.group(0) if ip_match else "127.0.0.1"
+    formatted["src_ip"] = raw_log.get("src_ip") or raw_log.get("source_ip") or extracted_ip
     formatted["src_port"] = raw_log.get("src_port")
     formatted["dst_ip"] = raw_log.get("dst_ip", "127.0.0.1")
     formatted["dst_port"] = raw_log.get("dst_port")
