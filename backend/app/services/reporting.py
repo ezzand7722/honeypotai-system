@@ -174,14 +174,17 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
             group["details"]["pipeline_id"] = record.get("pipeline_id")
             group["details"]["event"] = event.model_dump(mode="json")
 
-        # Keep the FIRST prediction we see (which is the newest one, since _store is newest-first)
-        if prediction and not group["details"]["prediction"]:
-            group["details"]["prediction"] = prediction.model_dump(mode="json")
-            # Update the top-level severity to match the newest prediction
-            if getattr(prediction, "severity", None):
-                group["severity"] = prediction.severity
-            elif getattr(prediction, "threat_level", None) and prediction.threat_level != "unknown":
-                group["severity"] = prediction.threat_level
+        if prediction:
+            risk_map = {"low": 1, "mild": 1, "medium": 2, "high": 3, "extreme": 4}
+            curr_sev = str(group.get("severity", "low")).lower()
+            pred_sev = str(getattr(prediction, "severity", None) or getattr(prediction, "threat_level", "low")).lower()
+            
+            if risk_map.get(pred_sev, 0) > risk_map.get(curr_sev, 0) or not group["details"]["prediction"]:
+                group["details"]["prediction"] = prediction.model_dump(mode="json")
+                if getattr(prediction, "severity", None):
+                    group["severity"] = prediction.severity
+                elif getattr(prediction, "threat_level", None) and prediction.threat_level != "unknown":
+                    group["severity"] = prediction.threat_level
 
         if not group["details"].get("command"):
             raw_md = event.metadata or {}

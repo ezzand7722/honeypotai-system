@@ -24,6 +24,7 @@ const menuItems = [
   { id: 'network', label: 'NETWORK', Component: Icons.Network },
   { id: 'history', label: 'ATTACK HISTORY', Component: Icons.History },
   { id: 'analysis', label: 'ANALYSIS', Component: Icons.Analysis },
+  { id: 'post_incident', label: 'COMPARISON', Component: Icons.Comparison },
   { id: 'raw_ai', label: 'RAW AI OUTPUT', Component: Icons.RawData },
   { id: 'config', label: 'SETTINGS', Component: Icons.Config },
 ];
@@ -421,7 +422,7 @@ function App() {
                 setIsAttacked(true);
                 setAlarmPlayedForSession(false);
               }
-              setShowOverlay(true);
+              // The user hates the forced popup, so we don't call setShowOverlay(true) here anymore.
             }
 
             if (!initialPoll && isRecentAlert && !discardedAlertIds.current.has(alertId)) {
@@ -439,8 +440,8 @@ function App() {
 
                   if (!currTest || currTest.id === mappedAttack.id) {
                     return { 
-                      ...mappedAttack, 
                       ...(currTest || {}), 
+                      ...mappedAttack, 
                       startTime: currTest?.startTime ?? mappedAttack.startTime, 
                       duration: currTest?.duration ?? mappedAttack.duration, 
                       progress: currTest?.progress ?? mappedAttack.progress 
@@ -1029,10 +1030,13 @@ function App() {
     }
     if (heuristicProgress < 100 && isAttacked) {
       setShowOverlay(false);
+      setActiveModule(prev => prev === 'post_incident' ? null : prev);
       return;
     }
     if (!isAttacked) {
       setCurrentScreen('main');
+      setShowOverlay(false);
+      setActiveModule(prev => prev === 'post_incident' ? null : prev);
       return;
     }
     finalizeAttackAndSave();
@@ -1041,6 +1045,7 @@ function App() {
   // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥ØºÙ„Ø§Ù‚ Ø§Ù„Ù€ overlay ÙÙ‚Ø· Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø©
   const hideOverlay = () => {
     setShowOverlay(false);
+    setActiveModule(prev => prev === 'post_incident' ? null : prev);
   };
 
   const handleNodeClick = (node, event) => {
@@ -1168,9 +1173,9 @@ function App() {
           <div style={{
             marginLeft: activeModule ? '0px' : '80px',
             width: activeModule ? '100%' : 'calc(100% - 80px)',
-            pointerEvents: showOverlay ? 'all' : 'none',
+            pointerEvents: (showOverlay || activeModule === 'post_incident') ? 'all' : 'none',
             position: 'fixed', top: 0, zIndex: 20000, height: '100%',
-            visibility: showOverlay ? 'visible' : 'hidden'
+            visibility: (showOverlay || activeModule === 'post_incident') ? 'visible' : 'hidden'
           }}>
             <AttackOverlay
               isAttacked={isAttacked}

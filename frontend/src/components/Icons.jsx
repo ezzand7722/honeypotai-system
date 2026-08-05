@@ -18,6 +18,9 @@ const Icons = {
   ),
   RawData: () => (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h16M4 18h7" /><polyline points="15 15 18 18 21 15" /></svg>
+  ),
+  Comparison: () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
   )
 };
 

@@ -33,7 +33,7 @@ echo "=== Stopping old backend process ==="
 PIDS=$(pgrep -f "uvicorn" 2>/dev/null || true)
 for PID in $PIDS; do
     if [ "$PID" != "$$" ]; then
-        kill "$PID" 2>/dev/null || true
+        kill -9 "$PID" 2>/dev/null || true
     fi
 done
 sleep 2
