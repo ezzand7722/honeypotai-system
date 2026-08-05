@@ -123,7 +123,7 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     try:
         results = await asyncio.to_thread(global_tracker.process_incoming_logs, formatted_logs)
     except Exception as e:
-        log.error("Error processing logs in DynamicAttackTracker: %s", e)
+        log.exception("Error processing logs in DynamicAttackTracker: %s", e)
         return {}
 
     results_by_ip = {}
