@@ -86,7 +86,7 @@ class DynamicAttackTracker:
                 if col in group.columns:
                     explicit_succ += pd.to_numeric(group[col], errors="coerce").fillna(0).sum()
 
-            combined_rows = group.apply(lambda r: " ".join(r.astype(str)), axis=1).str.lower()
+            combined_rows = group.apply(lambda r: " ".join(str(v) for v in r.values), axis=1).str.lower()
 
             pattern_conns = combined_rows.str.contains(r'connect|session|accepted|get|post|request|handshake|init', regex=True).sum()
             pattern_fails = combined_rows.str.contains(r'fail|invalid|unauthorized|denied|401|403|reject|wrong', regex=True).sum()
