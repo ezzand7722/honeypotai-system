@@ -134,7 +134,7 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     # Persist each AI v2 result to attack_context table + push to live WS feed
     for ip, result in results_by_ip.items():
         try:
-            upsert_attack_context(result)
+            await asyncio.to_thread(upsert_attack_context, result)
             _update_live_context_safe(result)
         except Exception as e:
             log.error("Failed to persist attack_context for ip=%s: %s", ip, e)

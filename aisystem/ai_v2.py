@@ -244,6 +244,7 @@ class DynamicAttackTracker:
         time.sleep(self.expiry_seconds + 0.5)
         now = time.time()
 
+        callbacks_to_fire = []
         with self.lock:
             for key, ctx in list(self.context_table.items()):
                 if ctx["status"] == "ongoing" and (now - ctx["last_seen"]) >= self.expiry_seconds:
@@ -264,9 +265,11 @@ class DynamicAttackTracker:
                         "suspicious_commands": ctx["suspicious_commands"],
                         "signal": "STOP_SENDING_LOGS"
                     }
+                    callbacks_to_fire.append(ended_payload)
 
-                    if self.callback_on_ended:
-                        self.callback_on_ended(ended_payload)
+        if self.callback_on_ended:
+            for payload in callbacks_to_fire:
+                self.callback_on_ended(payload)
 
 
 def main():
