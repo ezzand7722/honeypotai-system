@@ -140,7 +140,14 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
   // --- 5. بيانات النود والأقواس ---
   const currentAttacker = useMemo(() => {
     if (!isAttacked || hideAttacker) return null;
-    return attackerData || (attackerCoords ? { coords: attackerCoords, loc: "Moscow, RU", ip: "185.22.154.66", id: "EV-TEST" } : null);
+    const data = attackerData || (attackerCoords ? { coords: attackerCoords, loc: "Moscow, RU", ip: "185.22.154.66", id: "EV-TEST" } : null);
+    if (data && !data.coords) {
+      data.coords = { lat: 0, lng: 0 };
+    }
+    if (data && !data.loc) {
+      data.loc = data.city || 'Unknown, Unknown';
+    }
+    return data;
   }, [isAttacked, hideAttacker, attackerData, attackerCoords]);
 
   const currentTarget = useMemo(() => targetCoords || { lat: 31.9454, lng: 35.9284 }, [targetCoords]);
@@ -148,7 +155,7 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
   // --- التعديل هنا لترتيب الظهور ---
   const nodes = useMemo(() => [
     // 1. نضع المهاجم أولاً في المصفوفة ليكون في المقدمة (Z-index أعلى برمجياً في الـ WebGL)
-    ...(currentAttacker ? [{ id: 'attacker', lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, label: 'ATTACK_SOURCE', country: currentAttacker.loc.split(',')[1] || 'Unknown', city: currentAttacker.loc.split(',')[0] || 'Unknown', status: 'Threat', color: '#ff0000', ip: currentAttacker.ip, node_id: currentAttacker.id }] : []),
+    ...(currentAttacker ? [{ id: 'attacker', lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, label: 'ATTACK_SOURCE', country: (currentAttacker.loc || '').split(',')[1] || 'Unknown', city: (currentAttacker.loc || '').split(',')[0] || 'Unknown', status: 'Threat', color: '#ff0000', ip: currentAttacker.ip, node_id: currentAttacker.id }] : []),
     // 2. نضع العقد الثابتة بعد ذلك
     { id: 'CAMERA-1', lat: 31.9454, lng: 35.9284, label: 'DAHUA(IPC-HFW1431S)', country: 'Jordan', city: 'Amman', status: 'Active', node_id: 'IPC-HFW1431', ip: '127.0.0.1', color: '#00ff41' }
   ], [currentAttacker]);
