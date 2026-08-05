@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -30,58 +31,37 @@ def _update_live_context_safe(ai_output: dict) -> None:
     except Exception as e:
         log.debug("Could not update live context: %s", e)
 
-# Windows/Unix specific imports
-if platform.system() != "Windows":
-    import fcntl
-
 settings = get_settings()
 log = logging.getLogger(__name__)
 
 # Paths for AI system
-BASE_DIR = Path(__file__).resolve().parents[4]  # Up to proj folder
-# Alternatively, since backend and aisystem are usually side-by-side:
-PROJECT_ROOT = Path(__file__).resolve().parents[3] 
-# Actually, the file is at backend/app/services/ai_client.py (3 levels up is backend, 4 levels up is proj)
 AI_SYS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "aisystem")
 
-print("AI_SYS_DIR resolves to:", AI_SYS_DIR)
+# --- Initialize Global DynamicAttackTracker ---
+if AI_SYS_DIR not in sys.path:
+    sys.path.append(AI_SYS_DIR)
 
-DAHUA_LOGS = os.path.join(AI_SYS_DIR, "dahua_logs_multi.json")
-ATTACK_RESULTS = os.path.join(AI_SYS_DIR, "attack_results.json")
-AI_PY_SCRIPT = os.path.join(AI_SYS_DIR, "ai_v2.py")
-
-# Support both Windows and Linux venv paths
-if os.name == 'nt':
-    PYTHON_EXE = os.path.join(AI_SYS_DIR, "venv", "Scripts", "python.exe")
-else:
-    PYTHON_EXE = os.path.join(AI_SYS_DIR, "venv", "bin", "python")
-
-def _acquire_lock(lock_file: str, timeout: int = 30) -> bool:
-    """Acquire a file lock with timeout. Works on Windows and Unix."""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
+try:
+    from ai_v2 import DynamicAttackTracker
+    
+    def on_attack_ended(payload):
+        """Callback fired by DynamicAttackTracker when an IP is idle for 10 seconds."""
+        log.info("Attack ended for IP: %s", payload.get("src_ip"))
         try:
-            # Try to create lock file exclusively (atomic operation)
-            lock_fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(lock_fd)
-            return True
-        except FileExistsError:
-            time.sleep(0.1)  # Wait and retry
-    return False
+            upsert_attack_context(payload)
+            _update_live_context_safe(payload)
+        except Exception as e:
+            log.error("Failed to process ended attack payload: %s", e)
 
-
-def _release_lock(lock_file: str) -> None:
-    """Release a file lock."""
-    try:
-        if os.path.exists(lock_file):
-            os.remove(lock_file)
-    except Exception as e:
-        log.debug("Failed to remove lock file %s: %s", lock_file, e)
-
+    global_tracker = DynamicAttackTracker(expiry_seconds=10.0, callback_on_ended=on_attack_ended)
+    log.info("Successfully initialized stateful DynamicAttackTracker!")
+except ImportError as e:
+    log.error("Failed to import DynamicAttackTracker from ai_v2: %s", e)
+    global_tracker = None
+# -----------------------------------------------
 
 def _chunked(items: Sequence, size: int) -> List[Sequence]:
     return [items[i : i + size] for i in range(0, len(items), size)]
-
 
 def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
     formatted: Dict[str, Any] = {}
@@ -111,7 +91,6 @@ def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
 
     return formatted
 
-
 def _threat_level_from_severity(sev: str) -> str:
     return {
         "Extreme": "high", "High": "high",
@@ -132,64 +111,25 @@ def _confidence_from_severity(sev: str) -> float:
 
 
 async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]:
-    # 1. Append logs to dahua_logs_multi.json with file locking
-    lock_file = os.path.join(AI_SYS_DIR, ".dahua_logs.lock")
-    
-    if _acquire_lock(lock_file, timeout=30):
-        try:
-            with open(DAHUA_LOGS, "a", encoding="utf-8") as f:
-                for log_entry in formatted_logs:
-                    f.write(json.dumps(log_entry) + "\n")
-        except Exception as e:
-            log.error("Failed to append to %s: %s", DAHUA_LOGS, e)
-        finally:
-            _release_lock(lock_file)
-    else:
-        log.warning("Failed to acquire lock for %s", DAHUA_LOGS)
+    """
+    Now runs the AI engine directly in-memory, maintaining state across calls!
+    """
+    if not global_tracker:
+        log.error("DynamicAttackTracker not initialized! Returning empty results.")
+        return {}
 
-    # 2. Create unique temp file per instance to run ai.py
-    instance_id = str(uuid4())[:8]
-    temp_results_file = os.path.join(tempfile.gettempdir(), f"attack_results_{instance_id}.json")
-    
+    # Run the logs through the in-memory engine (which is thread-safe)
+    # We run it in a threadpool to not block the asyncio event loop during pandas/sklearn ops
     try:
-        # Run ai.py (it reads dahua_logs_multi.json and writes to attack_results.json)
-        process = await asyncio.create_subprocess_exec(
-            PYTHON_EXE, AI_PY_SCRIPT,
-            cwd=AI_SYS_DIR,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "ATTACK_RESULTS_FILE": temp_results_file}
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            log.error("ai.py failed with returncode %s", process.returncode)
-            log.error("stderr: %s", stderr.decode('utf-8', errors='replace'))
+        results = await asyncio.to_thread(global_tracker.process_incoming_logs, formatted_logs)
     except Exception as e:
-        log.error("Failed to execute ai.py: %s", e)
+        log.error("Error processing logs in DynamicAttackTracker: %s", e)
+        return {}
 
-    # 3. Read attack_results.json 
     results_by_ip = {}
-    results_file = temp_results_file if os.path.exists(temp_results_file) else ATTACK_RESULTS
-    
-    try:
-        if os.path.exists(results_file):
-            with open(results_file, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    results = json.loads(content)
-                    for r in results:
-                        results_by_ip[r.get("src_ip")] = r
-    except Exception as e:
-        log.error("Failed to read %s: %s", results_file, e)
-    finally:
-        # Save temp file as the latest ATTACK_RESULTS so the /raw-ai-output API can read it!
-        if temp_results_file != ATTACK_RESULTS and os.path.exists(temp_results_file):
-            try:
-                import shutil
-                shutil.copy2(temp_results_file, ATTACK_RESULTS)
-                os.remove(temp_results_file)
-            except Exception as e:
-                log.debug("Failed to clean up temp file %s: %s", temp_results_file, e)
+    if results:
+        for r in results:
+            results_by_ip[r.get("src_ip")] = r
 
     # Persist each AI v2 result to attack_context table + push to live WS feed
     for ip, result in results_by_ip.items():
@@ -200,7 +140,6 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
             log.error("Failed to persist attack_context for ip=%s: %s", ip, e)
 
     return results_by_ip
-
 
 def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline_info: dict = None) -> AiPrediction:
     src_ip = formatted_log.get("src_ip", "0.0.0.0")
@@ -249,7 +188,6 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
         }
     )
 
-
 async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[str, Any]] = None) -> None:
     formatted_log = _format_log_for_ai(original_log) if original_log is not None else event.model_dump(mode="json")
     persist_log_stage(event.event_id, "ai_normalized", formatted_log)
@@ -262,7 +200,6 @@ async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[s
     prediction = _build_prediction(event.event_id, formatted_log, result)
     attach_prediction(event.event_id, prediction)
     log.info("AI_RESPONSE: event_id=%s status=ok", event.event_id)
-
 
 async def submit_batch_for_scoring(
     events: list[EnrichedEvent],
