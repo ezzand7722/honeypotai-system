@@ -28,7 +28,17 @@ def get_attacker_stats(src_ip: str = Query(..., min_length=1)) -> dict:
 
 @router.get("/raw-ai-output")
 def get_raw_ai_output():
+    from app.services.persistence import load_recent_attack_contexts
+    
+    # 1. Try to get live ongoing tracking data from the AI's memory
+    live_data = []
     if global_tracker:
         with global_tracker.lock:
-            return list(global_tracker.context_table.values())
-    return []
+            live_data = list(global_tracker.context_table.values())
+            
+    if live_data:
+        return live_data
+        
+    # 2. If memory is empty (e.g., server just restarted and no new logs were uploaded), fallback to the database
+    db_rows = load_recent_attack_contexts(50)
+    return db_rows
