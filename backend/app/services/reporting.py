@@ -128,6 +128,8 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
         event = record["event"]
         prediction = record.get("prediction")
         received_at: datetime = record.get("received_at") or datetime.utcnow()
+        if received_at.tzinfo is not None:
+            received_at = received_at.replace(tzinfo=None)
 
         attack_type = event.attack_vector or "Unknown"
         severity = event.severity or "high"
