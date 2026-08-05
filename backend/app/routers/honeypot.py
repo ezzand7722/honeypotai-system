@@ -64,7 +64,7 @@ async def ingest_honeypot_event(
     logger.info("INGEST single event event_id=%s src=%s vec=%s", event.event_id, event.source_ip, event.attack_vector)
     raw_payload = mapped_record.model_dump(mode="json")
     normalized_payload = event.model_dump(mode="json")
-    record_alert(event, raw_log=raw_payload, normalized_log=normalized_payload)
+    await asyncio.to_thread(record_alert, event, None, None, raw_payload, normalized_payload)
     background_tasks.add_task(submit_for_scoring, event, raw_payload)
 
     return {"status": "accepted", "event_id": event.event_id}
@@ -153,12 +153,13 @@ async def ingest_honeypot_events_batch(
     raw_logs = [item.model_dump(mode="json") for item in mapped_records]
 
     for index, event in enumerate(events):
-        record_alert(
+        await asyncio.to_thread(
+            record_alert,
             event,
-            pipeline_id=pipeline_id,
-            chunk_index=index // chunk_size,
-            raw_log=raw_logs[index],
-            normalized_log=event.model_dump(mode="json"),
+            pipeline_id,
+            index // chunk_size,
+            raw_logs[index],
+            event.model_dump(mode="json"),
         )
     logger.info(
         "INGEST batch pipeline_id=%s events=%s chunk_size=%s format=%s first_event_id=%s",
@@ -214,12 +215,13 @@ async def ingest_honeypot_events_from_file(
 
             for index, event in enumerate(events):
                 try:
-                    record_alert(
+                    await asyncio.to_thread(
+                        record_alert,
                         event,
-                        pipeline_id=pipeline_id,
-                        chunk_index=index // chunk_size_val,
-                        raw_log=raw_logs[index],
-                        normalized_log=event.model_dump(mode="json"),
+                        pipeline_id,
+                        index // chunk_size_val,
+                        raw_logs[index],
+                        event.model_dump(mode="json"),
                     )
                 except Exception as e:
                     logger.error("RECORD_ALERT_ERROR_BG pipeline_id=%s event_id=%s error=%s", pipeline_id, event.event_id, e)

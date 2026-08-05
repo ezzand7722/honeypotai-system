@@ -198,7 +198,7 @@ async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[s
     result = results_by_ip.get(formatted_log.get("src_ip", ""), {})
 
     prediction = _build_prediction(event.event_id, formatted_log, result)
-    attach_prediction(event.event_id, prediction)
+    await asyncio.to_thread(attach_prediction, event.event_id, prediction)
     log.info("AI_RESPONSE: event_id=%s status=ok", event.event_id)
 
 async def submit_batch_for_scoring(
@@ -238,7 +238,7 @@ async def submit_batch_for_scoring(
                 for event, formatted_log in zip(event_chunk, formatted_chunk):
                     result = results_by_ip.get(formatted_log.get("src_ip", ""), {})
                     prediction = _build_prediction(event.event_id, formatted_log, result, pipeline_info)
-                    attach_prediction(event.event_id, prediction)
+                    await asyncio.to_thread(attach_prediction, event.event_id, prediction)
 
             except Exception as exc:
                 log.error("AI chunk scoring failed for pipeline %s chunk %s: %s", effective_pipeline_id, chunk_index, exc)
