@@ -162,6 +162,7 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
         event_id=event_id,
         model_version="isolation-forest-file-v1",
         threat_level=_threat_level_from_severity(sev),
+        severity=sev,
         risk_score=_risk_score_from_severity(sev),
         confidence=_confidence_from_severity(sev),
         labels=labels,

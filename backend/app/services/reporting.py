@@ -158,7 +158,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 "instance_count": 0,
                 "details": {
                     "event": event.model_dump(mode="json"),
-                    "prediction": prediction.model_dump(mode="json") if prediction else None,
+                    "prediction": None,
                     "received_at": received_at.isoformat(),
                     "pipeline_id": record.get("pipeline_id"),
                 }
@@ -166,23 +166,36 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
 
         group = groups[group_key]
         group["instance_count"] += 1
-        # Track newest ingestion timestamp for replay visibility / sorting
+        
+        # Track newest ingestion timestamp
         if received_at > group.get("last_received_at", received_at):
             group["last_received_at"] = received_at
             group["details"]["received_at"] = received_at.isoformat()
             group["details"]["pipeline_id"] = record.get("pipeline_id")
-            # Keep the most recently ingested raw event/prediction for context
             group["details"]["event"] = event.model_dump(mode="json")
-            group["details"]["prediction"] = prediction.model_dump(mode="json") if prediction else group["details"].get("prediction")
+
+        # Keep the FIRST prediction we see (which is the newest one, since _store is newest-first)
+        if prediction and not group["details"]["prediction"]:
+            group["details"]["prediction"] = prediction.model_dump(mode="json")
+            # Update the top-level severity to match the newest prediction
+            if getattr(prediction, "severity", None):
+                group["severity"] = prediction.severity
+            elif getattr(prediction, "threat_level", None) and prediction.threat_level != "unknown":
+                group["severity"] = prediction.threat_level
+
+        if not group["details"].get("command"):
+            raw_md = event.metadata or {}
+            cmd = raw_md.get("input")
+            if not cmd and "command" in str(raw_md.get("eventid", "")).lower():
+                cmd = raw_md.get("message")
+            if cmd:
+                group["details"]["command"] = cmd
 
         ts = event.first_seen.timestamp()
         if ts < group["first_seen"]:
             group["first_seen"] = ts
         if ts > group["last_seen"]:
             group["last_seen"] = ts
-        # Keep the most recent prediction details
-        if prediction and record.get("prediction"):
-            group["details"]["prediction"] = prediction.model_dump(mode="json")
 
     # Convert to list, use ingestion time as timestamp, sort newest first
     results = []
