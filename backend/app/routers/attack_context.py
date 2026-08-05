@@ -119,7 +119,7 @@ def update_live_context(ai_output: Dict[str, Any]) -> None:
 # ─── REST Endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/attack-context")
-async def list_attack_contexts(
+def list_attack_contexts(
     limit: int = Query(50, ge=1, le=200),
     status: Optional[str] = Query(None, description="Filter by attack_status: new, ongoing, ended")
 ) -> Dict[str, Any]:
@@ -156,7 +156,7 @@ async def list_attack_contexts(
 
 
 @router.get("/attack-context/active")
-async def list_active_attacks() -> Dict[str, Any]:
+def list_active_attacks() -> Dict[str, Any]:
     """Return only new + ongoing attack sessions."""
     db_rows = load_recent_attack_contexts(200)
     merged: Dict[str, Dict] = {}
@@ -174,7 +174,7 @@ async def list_active_attacks() -> Dict[str, Any]:
 
 
 @router.get("/attack-context/{attack_id}")
-async def get_attack_context(attack_id: str) -> Dict[str, Any]:
+def get_attack_context(attack_id: str) -> Dict[str, Any]:
     """Return a single attack session by ID."""
     # Check live store first
     if attack_id in _live_contexts:

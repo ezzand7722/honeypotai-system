@@ -9,12 +9,12 @@ router = APIRouter()
 
 
 @router.get("/alerts")
-async def alerts(limit: int = Query(20, ge=1, le=200)) -> dict:
+def alerts(limit: int = Query(20, ge=1, le=200)) -> dict:
     return {"status": "success", "alerts": recent_alerts(limit)}
 
 
 @router.get("/pipelines/{pipeline_id}")
-async def get_pipeline_status(pipeline_id: str) -> dict:
+def get_pipeline_status(pipeline_id: str) -> dict:
     status = pipeline_status(pipeline_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
@@ -22,12 +22,12 @@ async def get_pipeline_status(pipeline_id: str) -> dict:
 
 
 @router.get("/attacker-stats")
-async def get_attacker_stats(src_ip: str = Query(..., min_length=1)) -> dict:
+def get_attacker_stats(src_ip: str = Query(..., min_length=1)) -> dict:
     return {"status": "success", "src_ip": src_ip, "stats": attacker_stats(src_ip)}
 
 
 @router.get("/raw-ai-output")
-async def get_raw_ai_output():
+def get_raw_ai_output():
     if global_tracker:
         with global_tracker.lock:
             return list(global_tracker.context_table.values())
