@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from app.services.reporting import attacker_stats, pipeline_status, recent_alerts
-from app.services.ai_client import ATTACK_RESULTS
+from app.services.ai_client import global_tracker
 import os
 import json
 
@@ -28,12 +28,7 @@ async def get_attacker_stats(src_ip: str = Query(..., min_length=1)) -> dict:
 
 @router.get("/raw-ai-output")
 async def get_raw_ai_output():
-    if os.path.exists(ATTACK_RESULTS):
-        try:
-            with open(ATTACK_RESULTS, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                if content:
-                    return json.loads(content)
-        except Exception as e:
-            return {"error": str(e)}
+    if global_tracker:
+        with global_tracker.lock:
+            return list(global_tracker.context_table.values())
     return []
