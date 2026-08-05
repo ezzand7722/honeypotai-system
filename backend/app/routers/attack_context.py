@@ -1,0 +1,227 @@
+"""
+attack_context router
+
+Exposes the attack_context table (AI v2 output) to the frontend.
+Provides:
+  GET  /ai/attack-context          — paginated list of all sessions
+  GET  /ai/attack-context/active   — only new/ongoing sessions
+  GET  /ai/attack-context/{id}     — single session by attack_id
+  WS   /ai/attack-context/ws       — WebSocket live feed
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+
+from app.services.persistence import load_recent_attack_contexts
+
+router = APIRouter()
+log = logging.getLogger("honeypot.attack_context")
+
+# ─── In-memory live store (populated by ai_client after each AI v2 run) ──────
+_live_contexts: Dict[str, Dict[str, Any]] = {}
+_ws_clients: List[WebSocket] = []
+_ws_lock = asyncio.Lock()
+
+
+def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize AI v2 output dict into a clean, frontend-ready record.
+    Maps field aliases and ensures all expected keys are present.
+    """
+    attack_status = raw.get("attack_status", raw.get("status", "new"))
+    severity = raw.get("severity", "Low")
+
+    # Severity → numeric score for frontend progress bars
+    severity_score = {
+        "Extreme": 100, "High": 80, "Medium": 55, "Mild": 30, "Low": 10
+    }.get(severity, 10)
+
+    # Severity → color token
+    severity_color = {
+        "Extreme": "#ff2d55", "High": "#ff6b35",
+        "Medium": "#ffd60a", "Mild": "#30d158", "Low": "#636366"
+    }.get(severity, "#636366")
+
+    signal = raw.get("signal", "")
+    is_ended = attack_status == "ended" or signal == "STOP_SENDING_LOGS"
+
+    return {
+        # Core IDs
+        "attack_id":       raw.get("attack_id", ""),
+        "src_ip":          raw.get("src_ip", ""),
+        # Attack classification
+        "attack_type":     raw.get("attack_type", "Unknown"),
+        "attack_status":   "ended" if is_ended else attack_status,
+        "is_active":       not is_ended,
+        # Severity
+        "severity":        severity,
+        "severity_score":  severity_score,
+        "severity_color":  severity_color,
+        # Counters
+        "connection_count":   int(raw.get("connection_count", 0)),
+        "failed_count":       int(raw.get("failed_count", 0)),
+        "success_count":      int(raw.get("success_count", 0)),
+        "unique_passwords":   int(raw.get("unique_passwords", 0)),
+        "command_count":      int(raw.get("command_count", 0)),
+        "suspicious_cmds":    int(raw.get("suspicious_commands", raw.get("suspicious_cmds", 0))),
+        # Timing
+        "duration_seconds":  float(raw.get("duration_seconds", 0.0)),
+        "start_time":        raw.get("start_time", raw.get("last_seen_time", "")),
+        "last_seen_time":    raw.get("last_seen_time", ""),
+        "ended_time":        raw.get("ended_time", None),
+        # Signals
+        "signal":            signal,
+    }
+
+
+async def _broadcast(message: Dict[str, Any]) -> None:
+    """Broadcast a message to all connected WebSocket clients."""
+    if not _ws_clients:
+        return
+    dead = []
+    payload = json.dumps(message)
+    async with _ws_lock:
+        for ws in _ws_clients:
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            _ws_clients.remove(ws)
+
+
+def update_live_context(ai_output: Dict[str, Any]) -> None:
+    """
+    Called by ai_client whenever AI v2 produces output.
+    Updates the in-memory store and schedules a WebSocket broadcast.
+    """
+    normalized = normalize_ai_output_for_frontend(ai_output)
+    attack_id = normalized["attack_id"]
+    if not attack_id:
+        return
+    _live_contexts[attack_id] = normalized
+    # Schedule broadcast (fire and forget)
+    try:
+        loop = asyncio.get_event_loop()
+        loop.call_soon_threadsafe(asyncio.ensure_future, _broadcast({
+            "type": "attack_context_update",
+            "data": normalized
+        }))
+    except RuntimeError:
+        pass  # No event loop running (e.g., during tests)
+
+
+# ─── REST Endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/attack-context")
+async def list_attack_contexts(
+    limit: int = Query(50, ge=1, le=200),
+    status: Optional[str] = Query(None, description="Filter by attack_status: new, ongoing, ended")
+) -> Dict[str, Any]:
+    """Return all attack sessions (from DB + live in-memory overlay)."""
+    # Load from DB
+    db_rows = load_recent_attack_contexts(limit)
+    # Merge with live in-memory contexts (live takes priority)
+    merged: Dict[str, Dict] = {}
+    for row in db_rows:
+        aid = row.get("attack_id", "")
+        if aid:
+            merged[aid] = normalize_ai_output_for_frontend({
+                **row,
+                "suspicious_cmds": row.get("suspicious_cmds", 0)
+            })
+    # Override with live data
+    for aid, ctx in _live_contexts.items():
+        merged[aid] = ctx
+
+    results = list(merged.values())
+
+    # Apply status filter
+    if status:
+        results = [r for r in results if r["attack_status"] == status]
+
+    # Sort by last_seen_time desc, then by severity_score desc
+    results.sort(key=lambda x: (x.get("last_seen_time", ""), x.get("severity_score", 0)), reverse=True)
+
+    return {
+        "status": "success",
+        "count": len(results),
+        "attack_contexts": results[:limit]
+    }
+
+
+@router.get("/attack-context/active")
+async def list_active_attacks() -> Dict[str, Any]:
+    """Return only new + ongoing attack sessions."""
+    db_rows = load_recent_attack_contexts(200)
+    merged: Dict[str, Dict] = {}
+    for row in db_rows:
+        aid = row.get("attack_id", "")
+        status = row.get("attack_status", "")
+        if aid and status in ("new", "ongoing"):
+            merged[aid] = normalize_ai_output_for_frontend(row)
+    for aid, ctx in _live_contexts.items():
+        if ctx.get("is_active"):
+            merged[aid] = ctx
+
+    results = sorted(merged.values(), key=lambda x: x.get("severity_score", 0), reverse=True)
+    return {"status": "success", "count": len(results), "attack_contexts": results}
+
+
+@router.get("/attack-context/{attack_id}")
+async def get_attack_context(attack_id: str) -> Dict[str, Any]:
+    """Return a single attack session by ID."""
+    # Check live store first
+    if attack_id in _live_contexts:
+        return {"status": "success", "attack_context": _live_contexts[attack_id]}
+    # Fall back to DB
+    rows = load_recent_attack_contexts(500)
+    for row in rows:
+        if row.get("attack_id") == attack_id:
+            return {"status": "success", "attack_context": normalize_ai_output_for_frontend(row)}
+    return {"status": "not_found", "attack_context": None}
+
+
+# ─── WebSocket Endpoint ───────────────────────────────────────────────────────
+
+@router.websocket("/attack-context/ws")
+async def attack_context_ws(websocket: WebSocket):
+    """
+    WebSocket live feed for attack_context updates.
+    Frontend connects here and receives real-time attack state changes.
+    """
+    await websocket.accept()
+    async with _ws_lock:
+        _ws_clients.append(websocket)
+    log.info("WS client connected, total=%d", len(_ws_clients))
+
+    # Send current state on connect
+    try:
+        current = list(_live_contexts.values())
+        await websocket.send_text(json.dumps({
+            "type": "initial_state",
+            "data": current
+        }))
+    except Exception:
+        pass
+
+    try:
+        while True:
+            # Keep-alive ping every 30 seconds
+            await asyncio.sleep(30)
+            try:
+                await websocket.send_text(json.dumps({"type": "ping"}))
+            except Exception:
+                break
+    except WebSocketDisconnect:
+        pass
+    finally:
+        async with _ws_lock:
+            if websocket in _ws_clients:
+                _ws_clients.remove(websocket)
+        log.info("WS client disconnected, total=%d", len(_ws_clients))

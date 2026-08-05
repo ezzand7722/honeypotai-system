@@ -20,7 +20,6 @@ def _db_path() -> Path:
     configured = Path(settings.database_path)
     if configured.is_absolute():
         return configured
-
     backend_root = Path(__file__).resolve().parents[2]
     return (backend_root / configured).resolve()
 
@@ -51,6 +50,10 @@ def _json(value: Any) -> str:
     return json.dumps(value, default=str, ensure_ascii=False)
 
 
+# ────────────────────────────────────────────────────────────
+# Database initialisation
+# ────────────────────────────────────────────────────────────
+
 def initialize_database() -> None:
     if _use_postgres():
         log.info("Persistence target: Supabase/Postgres (DATABASE_URL is set)")
@@ -58,8 +61,8 @@ def initialize_database() -> None:
             conn = _connect_postgres()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
+                    # Legacy tables (kept for backward compatibility)
+                    cur.execute("""
                         CREATE TABLE IF NOT EXISTS public.attack_events (
                             event_id TEXT PRIMARY KEY,
                             pipeline_id TEXT,
@@ -75,24 +78,20 @@ def initialize_database() -> None:
                             created_at TIMESTAMPTZ,
                             updated_at TIMESTAMPTZ
                         )
-                        """
-                    )
-                    cur.execute(
-                        """
+                    """)
+                    cur.execute("""
                         CREATE TABLE IF NOT EXISTS public.event_logs (
                             id BIGSERIAL PRIMARY KEY,
-                            event_id TEXT NOT NULL REFERENCES public.attack_events(event_id) ON DELETE CASCADE,
+                            event_id TEXT NOT NULL,
                             stage TEXT NOT NULL,
                             payload JSONB NOT NULL,
                             created_at TIMESTAMPTZ NOT NULL,
                             UNIQUE(event_id, stage)
                         )
-                        """
-                    )
-                    cur.execute(
-                        """
+                    """)
+                    cur.execute("""
                         CREATE TABLE IF NOT EXISTS public.ai_results (
-                            event_id TEXT PRIMARY KEY REFERENCES public.attack_events(event_id) ON DELETE CASCADE,
+                            event_id TEXT PRIMARY KEY,
                             model_version TEXT,
                             threat_level TEXT,
                             risk_score DOUBLE PRECISION,
@@ -101,20 +100,44 @@ def initialize_database() -> None:
                             prediction_payload JSONB,
                             processed_at TIMESTAMPTZ
                         )
-                        """
-                    )
+                    """)
+                    # NEW: attack_context table (main AI v2 output table)
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS public.attack_context (
+                            attack_id      VARCHAR(36)  PRIMARY KEY,
+                            src_ip         VARCHAR(45)  NOT NULL,
+                            attack_type    VARCHAR(50)  NOT NULL,
+                            attack_status  VARCHAR(20)  NOT NULL DEFAULT 'new',
+                            severity       VARCHAR(20)  NOT NULL DEFAULT 'Low',
+                            connection_count  INT  NOT NULL DEFAULT 0,
+                            failed_count      INT  NOT NULL DEFAULT 0,
+                            success_count     INT  NOT NULL DEFAULT 0,
+                            unique_passwords   INT  NOT NULL DEFAULT 0,
+                            command_count     INT  NOT NULL DEFAULT 0,
+                            suspicious_cmds   INT  NOT NULL DEFAULT 0,
+                            start_time        TIMESTAMP NOT NULL DEFAULT NOW(),
+                            last_seen_time    TIMESTAMP NOT NULL DEFAULT NOW(),
+                            ended_time        TIMESTAMP NULL
+                        )
+                    """)
+                    cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_attack_context_src_ip
+                            ON public.attack_context (src_ip)
+                    """)
+                    cur.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_attack_context_status
+                            ON public.attack_context (attack_status)
+                    """)
                 conn.commit()
             finally:
                 conn.close()
         return
 
     log.info("Persistence target: local SQLite at %s", _db_path())
-
     with _lock:
         conn = _connect()
         try:
-            conn.execute(
-                """
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS attack_events (
                     event_id TEXT PRIMARY KEY,
                     pipeline_id TEXT,
@@ -130,10 +153,8 @@ def initialize_database() -> None:
                     created_at TEXT,
                     updated_at TEXT
                 )
-                """
-            )
-            conn.execute(
-                """
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS event_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id TEXT NOT NULL,
@@ -142,10 +163,8 @@ def initialize_database() -> None:
                     created_at TEXT NOT NULL,
                     UNIQUE(event_id, stage)
                 )
-                """
-            )
-            conn.execute(
-                """
+            """)
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS ai_results (
                     event_id TEXT PRIMARY KEY,
                     model_version TEXT,
@@ -156,12 +175,180 @@ def initialize_database() -> None:
                     prediction_payload TEXT,
                     processed_at TEXT
                 )
-                """
-            )
+            """)
+            # NEW: attack_context table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS attack_context (
+                    attack_id      TEXT PRIMARY KEY,
+                    src_ip         TEXT NOT NULL,
+                    attack_type    TEXT NOT NULL,
+                    attack_status  TEXT NOT NULL DEFAULT 'new',
+                    severity       TEXT NOT NULL DEFAULT 'Low',
+                    connection_count  INTEGER NOT NULL DEFAULT 0,
+                    failed_count      INTEGER NOT NULL DEFAULT 0,
+                    success_count     INTEGER NOT NULL DEFAULT 0,
+                    unique_passwords   INTEGER NOT NULL DEFAULT 0,
+                    command_count     INTEGER NOT NULL DEFAULT 0,
+                    suspicious_cmds   INTEGER NOT NULL DEFAULT 0,
+                    start_time        TEXT NOT NULL,
+                    last_seen_time    TEXT NOT NULL,
+                    ended_time        TEXT NULL
+                )
+            """)
             conn.commit()
         finally:
             conn.close()
 
+
+# ────────────────────────────────────────────────────────────
+# attack_context UPSERT  (called by ai_client after AI v2 runs)
+# ────────────────────────────────────────────────────────────
+
+def upsert_attack_context(ai_output: dict) -> None:
+    """
+    Upsert a single AI v2 output record into attack_context.
+    Handles new / ongoing / ended lifecycles.
+    """
+    attack_id = ai_output.get("attack_id", "")
+    if not attack_id:
+        log.warning("upsert_attack_context: missing attack_id, skipping")
+        return
+
+    src_ip = ai_output.get("src_ip", "")
+    attack_type = ai_output.get("attack_type", "Unknown")
+    attack_status = ai_output.get("attack_status", "new")
+    severity = ai_output.get("severity", "Low")
+    connection_count = int(ai_output.get("connection_count", 0))
+    failed_count = int(ai_output.get("failed_count", 0))
+    success_count = int(ai_output.get("success_count", 0))
+    unique_passwords = int(ai_output.get("unique_passwords", 0))
+    command_count = int(ai_output.get("command_count", 0))
+    suspicious_cmds = int(ai_output.get("suspicious_commands", ai_output.get("suspicious_cmds", 0)))
+    now = _utc_now()
+    ended_time = now if attack_status == "ended" else None
+
+    if _use_postgres():
+        with _lock:
+            conn = _connect_postgres()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        INSERT INTO public.attack_context (
+                            attack_id, src_ip, attack_type, attack_status, severity,
+                            connection_count, failed_count, success_count,
+                            unique_passwords, command_count, suspicious_cmds,
+                            start_time, last_seen_time, ended_time
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s)
+                        ON CONFLICT (attack_id) DO UPDATE SET
+                            attack_status     = EXCLUDED.attack_status,
+                            severity          = EXCLUDED.severity,
+                            connection_count  = EXCLUDED.connection_count,
+                            failed_count      = EXCLUDED.failed_count,
+                            success_count     = EXCLUDED.success_count,
+                            unique_passwords  = EXCLUDED.unique_passwords,
+                            command_count     = EXCLUDED.command_count,
+                            suspicious_cmds   = EXCLUDED.suspicious_cmds,
+                            last_seen_time    = NOW(),
+                            ended_time        = EXCLUDED.ended_time
+                    """, (
+                        attack_id, src_ip, attack_type, attack_status, severity,
+                        connection_count, failed_count, success_count,
+                        unique_passwords, command_count, suspicious_cmds,
+                        ended_time,
+                    ))
+                conn.commit()
+                log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
+            except Exception as e:
+                log.error("Failed to upsert attack_context: %s", e)
+            finally:
+                conn.close()
+        return
+
+    # SQLite fallback
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute("""
+                INSERT INTO attack_context (
+                    attack_id, src_ip, attack_type, attack_status, severity,
+                    connection_count, failed_count, success_count,
+                    unique_passwords, command_count, suspicious_cmds,
+                    start_time, last_seen_time, ended_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (attack_id) DO UPDATE SET
+                    attack_status     = excluded.attack_status,
+                    severity          = excluded.severity,
+                    connection_count  = excluded.connection_count,
+                    failed_count      = excluded.failed_count,
+                    success_count     = excluded.success_count,
+                    unique_passwords  = excluded.unique_passwords,
+                    command_count     = excluded.command_count,
+                    suspicious_cmds   = excluded.suspicious_cmds,
+                    last_seen_time    = excluded.last_seen_time,
+                    ended_time        = excluded.ended_time
+            """, (
+                attack_id, src_ip, attack_type, attack_status, severity,
+                connection_count, failed_count, success_count,
+                unique_passwords, command_count, suspicious_cmds,
+                now, now, ended_time,
+            ))
+            conn.commit()
+            log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
+        except Exception as e:
+            log.error("Failed to upsert attack_context (SQLite): %s", e)
+        finally:
+            conn.close()
+
+
+def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
+    """Load most recent attack_context rows ordered by last_seen_time DESC."""
+    results = []
+    if _use_postgres():
+        with _lock:
+            conn = _connect_postgres()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                               connection_count, failed_count, success_count,
+                               unique_passwords, command_count, suspicious_cmds,
+                               start_time, last_seen_time, ended_time
+                        FROM public.attack_context
+                        ORDER BY last_seen_time DESC
+                        LIMIT %s
+                    """, (limit,))
+                    cols = [d[0] for d in cur.description]
+                    for row in cur.fetchall():
+                        results.append(dict(zip(cols, row)))
+            except Exception as e:
+                log.error("load_recent_attack_contexts postgres error: %s", e)
+            finally:
+                conn.close()
+    else:
+        with _lock:
+            conn = _connect()
+            try:
+                cursor = conn.execute("""
+                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                           connection_count, failed_count, success_count,
+                           unique_passwords, command_count, suspicious_cmds,
+                           start_time, last_seen_time, ended_time
+                    FROM attack_context
+                    ORDER BY last_seen_time DESC
+                    LIMIT ?
+                """, (limit,))
+                for row in cursor.fetchall():
+                    results.append(dict(row))
+            except Exception as e:
+                log.error("load_recent_attack_contexts sqlite error: %s", e)
+            finally:
+                conn.close()
+    return results
+
+
+# ────────────────────────────────────────────────────────────
+# Legacy persistence functions (kept for backward compat)
+# ────────────────────────────────────────────────────────────
 
 def persist_ingested_event(
     event: EnrichedEvent,
@@ -179,8 +366,7 @@ def persist_ingested_event(
             try:
                 now = _utc_now()
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
+                    cur.execute("""
                         INSERT INTO public.attack_events (
                             event_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
                             attack_vector, severity, risk_score, first_seen, status, created_at, updated_at
@@ -196,47 +382,25 @@ def persist_ingested_event(
                             risk_score=EXCLUDED.risk_score,
                             first_seen=EXCLUDED.first_seen,
                             updated_at=EXCLUDED.updated_at
-                        """,
-                        (
-                            event.event_id,
-                            pipeline_id,
-                            chunk_index,
-                            str(event.source_ip),
-                            str(event.destination_ip),
-                            int(event.destination_port),
-                            event.attack_vector,
-                            event.severity,
-                            float(event.risk_score),
-                            event.first_seen.isoformat(),
-                            "ingested",
-                            now,
-                            now,
-                        ),
-                    )
-
+                    """, (
+                        event.event_id, pipeline_id, chunk_index,
+                        str(event.source_ip), str(event.destination_ip), int(event.destination_port),
+                        event.attack_vector, event.severity, float(event.risk_score),
+                        event.first_seen.isoformat(), "ingested", now, now,
+                    ))
                     if raw_log is not None:
-                        cur.execute(
-                            """
+                        cur.execute("""
                             INSERT INTO public.event_logs (event_id, stage, payload, created_at)
                             VALUES (%s, 'raw', %s::jsonb, %s)
                             ON CONFLICT(event_id, stage) DO UPDATE SET
-                                payload=EXCLUDED.payload,
-                                created_at=EXCLUDED.created_at
-                            """,
-                            (event.event_id, _json(raw_log), now),
-                        )
-
-                    cur.execute(
-                        """
+                                payload=EXCLUDED.payload, created_at=EXCLUDED.created_at
+                        """, (event.event_id, _json(raw_log), now))
+                    cur.execute("""
                         INSERT INTO public.event_logs (event_id, stage, payload, created_at)
                         VALUES (%s, 'normalized', %s::jsonb, %s)
                         ON CONFLICT(event_id, stage) DO UPDATE SET
-                            payload=EXCLUDED.payload,
-                            created_at=EXCLUDED.created_at
-                        """,
-                        (event.event_id, _json(normalized_payload), now),
-                    )
-
+                            payload=EXCLUDED.payload, created_at=EXCLUDED.created_at
+                    """, (event.event_id, _json(normalized_payload), now))
                 conn.commit()
             finally:
                 conn.close()
@@ -246,8 +410,7 @@ def persist_ingested_event(
         conn = _connect()
         try:
             now = _utc_now()
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO attack_events (
                     event_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
                     attack_vector, severity, risk_score, first_seen, status, created_at, updated_at
@@ -263,47 +426,25 @@ def persist_ingested_event(
                     risk_score=excluded.risk_score,
                     first_seen=excluded.first_seen,
                     updated_at=excluded.updated_at
-                """,
-                (
-                    event.event_id,
-                    pipeline_id,
-                    chunk_index,
-                    str(event.source_ip),
-                    str(event.destination_ip),
-                    int(event.destination_port),
-                    event.attack_vector,
-                    event.severity,
-                    float(event.risk_score),
-                    event.first_seen.isoformat(),
-                    "ingested",
-                    now,
-                    now,
-                ),
-            )
-
+            """, (
+                event.event_id, pipeline_id, chunk_index,
+                str(event.source_ip), str(event.destination_ip), int(event.destination_port),
+                event.attack_vector, event.severity, float(event.risk_score),
+                event.first_seen.isoformat(), "ingested", now, now,
+            ))
             if raw_log is not None:
-                conn.execute(
-                    """
+                conn.execute("""
                     INSERT INTO event_logs (event_id, stage, payload, created_at)
                     VALUES (?, 'raw', ?, ?)
                     ON CONFLICT(event_id, stage) DO UPDATE SET
-                        payload=excluded.payload,
-                        created_at=excluded.created_at
-                    """,
-                    (event.event_id, _json(raw_log), now),
-                )
-
-            conn.execute(
-                """
+                        payload=excluded.payload, created_at=excluded.created_at
+                """, (event.event_id, _json(raw_log), now))
+            conn.execute("""
                 INSERT INTO event_logs (event_id, stage, payload, created_at)
                 VALUES (?, 'normalized', ?, ?)
                 ON CONFLICT(event_id, stage) DO UPDATE SET
-                    payload=excluded.payload,
-                    created_at=excluded.created_at
-                """,
-                (event.event_id, _json(normalized_payload), now),
-            )
-
+                    payload=excluded.payload, created_at=excluded.created_at
+            """, (event.event_id, _json(normalized_payload), now))
             conn.commit()
         finally:
             conn.close()
@@ -316,16 +457,12 @@ def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> Non
             try:
                 now = _utc_now()
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
+                    cur.execute("""
                         INSERT INTO public.event_logs (event_id, stage, payload, created_at)
                         VALUES (%s, %s, %s::jsonb, %s)
                         ON CONFLICT(event_id, stage) DO UPDATE SET
-                            payload=EXCLUDED.payload,
-                            created_at=EXCLUDED.created_at
-                        """,
-                        (event_id, stage, _json(payload), now),
-                    )
+                            payload=EXCLUDED.payload, created_at=EXCLUDED.created_at
+                    """, (event_id, stage, _json(payload), now))
                 conn.commit()
             finally:
                 conn.close()
@@ -335,16 +472,12 @@ def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> Non
         conn = _connect()
         try:
             now = _utc_now()
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO event_logs (event_id, stage, payload, created_at)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(event_id, stage) DO UPDATE SET
-                    payload=excluded.payload,
-                    created_at=excluded.created_at
-                """,
-                (event_id, stage, _json(payload), now),
-            )
+                    payload=excluded.payload, created_at=excluded.created_at
+            """, (event_id, stage, _json(payload), now))
             conn.commit()
         finally:
             conn.close()
@@ -358,8 +491,7 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                 now = _utc_now()
                 prediction_payload = prediction.model_dump(mode="json")
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
+                    cur.execute("""
                         INSERT INTO public.ai_results (
                             event_id, model_version, threat_level, risk_score,
                             confidence, summary, prediction_payload, processed_at
@@ -372,26 +504,16 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                             summary=EXCLUDED.summary,
                             prediction_payload=EXCLUDED.prediction_payload,
                             processed_at=EXCLUDED.processed_at
-                        """,
-                        (
-                            event_id,
-                            prediction.model_version,
-                            prediction.threat_level,
-                            float(prediction.risk_score),
-                            float(prediction.confidence),
-                            prediction.summary,
-                            _json(prediction_payload),
-                            now,
-                        ),
-                    )
-                    cur.execute(
-                        """
+                    """, (
+                        event_id, prediction.model_version, prediction.threat_level,
+                        float(prediction.risk_score), float(prediction.confidence),
+                        prediction.summary, _json(prediction_payload), now,
+                    ))
+                    cur.execute("""
                         UPDATE public.attack_events
                         SET status = 'processed', updated_at = %s
                         WHERE event_id = %s
-                        """,
-                        (now, event_id),
-                    )
+                    """, (now, event_id))
                 conn.commit()
             finally:
                 conn.close()
@@ -402,8 +524,7 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
         try:
             now = _utc_now()
             prediction_payload = prediction.model_dump(mode="json")
-            conn.execute(
-                """
+            conn.execute("""
                 INSERT INTO ai_results (
                     event_id, model_version, threat_level, risk_score,
                     confidence, summary, prediction_payload, processed_at
@@ -416,26 +537,16 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                     summary=excluded.summary,
                     prediction_payload=excluded.prediction_payload,
                     processed_at=excluded.processed_at
-                """,
-                (
-                    event_id,
-                    prediction.model_version,
-                    prediction.threat_level,
-                    float(prediction.risk_score),
-                    float(prediction.confidence),
-                    prediction.summary,
-                    _json(prediction_payload),
-                    now,
-                ),
-            )
-            conn.execute(
-                """
+            """, (
+                event_id, prediction.model_version, prediction.threat_level,
+                float(prediction.risk_score), float(prediction.confidence),
+                prediction.summary, _json(prediction_payload), now,
+            ))
+            conn.execute("""
                 UPDATE attack_events
                 SET status = 'processed', updated_at = ?
                 WHERE event_id = ?
-                """,
-                (now, event_id),
-            )
+            """, (now, event_id))
             conn.commit()
         finally:
             conn.close()
@@ -448,8 +559,7 @@ def load_all_events() -> list[dict[str, Any]]:
             conn = _connect_postgres()
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        """
+                    cur.execute("""
                         SELECT ae.event_id, ae.pipeline_id, ae.chunk_index, ae.created_at,
                                el.payload as event_payload, ar.prediction_payload
                         FROM public.attack_events ae
@@ -457,8 +567,7 @@ def load_all_events() -> list[dict[str, Any]]:
                         LEFT JOIN public.ai_results ar ON ae.event_id = ar.event_id
                         ORDER BY ae.created_at DESC
                         LIMIT 200
-                        """
-                    )
+                    """)
                     rows = cur.fetchall()
                     for row in rows:
                         event_id, pipeline_id, chunk_index, created_at, event_payload, prediction_payload = row
@@ -478,8 +587,7 @@ def load_all_events() -> list[dict[str, Any]]:
         with _lock:
             conn = _connect()
             try:
-                cursor = conn.execute(
-                    """
+                cursor = conn.execute("""
                     SELECT ae.event_id, ae.pipeline_id, ae.chunk_index, ae.created_at,
                            el.payload as event_payload, ar.prediction_payload
                     FROM attack_events ae
@@ -487,8 +595,7 @@ def load_all_events() -> list[dict[str, Any]]:
                     LEFT JOIN ai_results ar ON ae.event_id = ar.event_id
                     ORDER BY ae.created_at DESC
                     LIMIT 200
-                    """
-                )
+                """)
                 for row in cursor.fetchall():
                     results.append({
                         "event_id": row["event_id"],

@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.routers import ai_inference, honeypot, reporting, system
+from app.routers import ai_inference, attack_context, honeypot, reporting, system
 from app.services.persistence import initialize_database
 
 
@@ -115,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_inference.router, prefix="/ai", tags=["ai"])
     app.include_router(reporting.router, prefix="/report", tags=["reporting"])
     app.include_router(system.router, prefix="/system", tags=["system"])
+    app.include_router(attack_context.router, prefix="/ai", tags=["attack-context"])
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

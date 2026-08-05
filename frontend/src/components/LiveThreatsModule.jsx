@@ -6,7 +6,8 @@ const LiveThreatsModule = ({
   activeAttacks, 
   activeTestAttack, 
   onSelectAttack,
-  onOpenMultiDashboard
+  onOpenMultiDashboard,
+  onEndAttack
 }) => {
 
   // تم استخدام useMemo لتوحيد المصفوفة ومنع التكرار اللحظي الذي يسبب تكرار الصوت 
@@ -65,6 +66,14 @@ const LiveThreatsModule = ({
              style={{ marginLeft: '20px', padding: '10px 14px', background: 'transparent', color: '#00ff41', border: '1px solid #00ff41', cursor: 'pointer', fontWeight: '700' }}
            >
              MULTI DASHBOARD
+           </button>
+         )}
+         {isAttacked && onEndAttack && (
+           <button
+             onClick={onEndAttack}
+             style={{ marginLeft: 'auto', padding: '10px 20px', background: '#ff0000', color: '#ffffff', border: '2px solid #ffffff', cursor: 'pointer', fontWeight: '900', borderRadius: '4px', boxShadow: '0 0 15px rgba(255,0,0,0.8)' }}
+           >
+             🛑 END ATTACK NOW
            </button>
          )}
       </div>

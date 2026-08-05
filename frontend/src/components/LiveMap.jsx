@@ -115,6 +115,8 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
   }, []);
 
   // --- 4. التحكم في الكاميرا ---
+  const lastFocusedKeyRef = useRef(null);
+
   useEffect(() => {
     if (globeRef.current) {
       const controls = globeRef.current.controls();
@@ -123,7 +125,14 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
       if (isAttacked && (attackerData || attackerCoords)) {
         const targetLat = attackerData?.coords?.lat || attackerCoords?.lat || 55.7558;
         const targetLng = attackerData?.coords?.lng || attackerCoords?.lng || 37.6173;
-        globeRef.current.pointOfView({ lat: targetLat, lng: targetLng, altitude: 2.5 }, 1000);
+        const focusKey = `${targetLat}_${targetLng}_${attackerData?.id || ''}`;
+        
+        if (lastFocusedKeyRef.current !== focusKey) {
+          lastFocusedKeyRef.current = focusKey;
+          globeRef.current.pointOfView({ lat: targetLat, lng: targetLng, altitude: 2.5 }, 1000);
+        }
+      } else {
+        lastFocusedKeyRef.current = null;
       }
     }
   }, [isAttacked, attackerData, attackerCoords]);

@@ -13,7 +13,7 @@ import time
 
 from app.config import get_settings
 from app.schemas.event import AiPrediction, EnrichedEvent
-from app.services.persistence import persist_log_stage
+from app.services.persistence import persist_log_stage, upsert_attack_context
 from app.services.reporting import (
     attach_prediction,
     complete_pipeline,
@@ -21,6 +21,14 @@ from app.services.reporting import (
     mark_chunk_failed,
     mark_chunk_sent,
 )
+
+def _update_live_context_safe(ai_output: dict) -> None:
+    """Lazy import to avoid circular import with attack_context router."""
+    try:
+        from app.routers.attack_context import update_live_context
+        update_live_context(ai_output)
+    except Exception as e:
+        log.debug("Could not update live context: %s", e)
 
 # Windows/Unix specific imports
 if platform.system() != "Windows":
@@ -40,7 +48,7 @@ print("AI_SYS_DIR resolves to:", AI_SYS_DIR)
 
 DAHUA_LOGS = os.path.join(AI_SYS_DIR, "dahua_logs_multi.json")
 ATTACK_RESULTS = os.path.join(AI_SYS_DIR, "attack_results.json")
-AI_PY_SCRIPT = os.path.join(AI_SYS_DIR, "ai.py")
+AI_PY_SCRIPT = os.path.join(AI_SYS_DIR, "ai_v2.py")
 
 # Support both Windows and Linux venv paths
 if os.name == 'nt':
@@ -105,13 +113,22 @@ def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _threat_level_from_severity(sev: str) -> str:
-    return {"High": "high", "Medium": "medium", "Low": "low"}.get(sev, "low")
+    return {
+        "Extreme": "high", "High": "high",
+        "Medium": "medium", "Mild": "low", "Low": "low"
+    }.get(sev, "low")
 
 def _risk_score_from_severity(sev: str) -> float:
-    return {"High": 0.92, "Medium": 0.65, "Low": 0.30}.get(sev, 0.30)
+    return {
+        "Extreme": 0.99, "High": 0.92,
+        "Medium": 0.65, "Mild": 0.40, "Low": 0.20
+    }.get(sev, 0.30)
 
 def _confidence_from_severity(sev: str) -> float:
-    return {"High": 0.90, "Medium": 0.78, "Low": 0.60}.get(sev, 0.60)
+    return {
+        "Extreme": 0.97, "High": 0.90,
+        "Medium": 0.78, "Mild": 0.65, "Low": 0.55
+    }.get(sev, 0.60)
 
 
 async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -174,6 +191,14 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
             except Exception as e:
                 log.debug("Failed to clean up temp file %s: %s", temp_results_file, e)
 
+    # Persist each AI v2 result to attack_context table + push to live WS feed
+    for ip, result in results_by_ip.items():
+        try:
+            upsert_attack_context(result)
+            _update_live_context_safe(result)
+        except Exception as e:
+            log.error("Failed to persist attack_context for ip=%s: %s", ip, e)
+
     return results_by_ip
 
 
@@ -216,6 +241,10 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
             "pipeline": result.get("pipeline", []),
             "attack_id": result.get("attack_id", ""),
             "detection_time": result.get("detection_time", ""),
+            "attack_status": result.get("attack_status", "new"),
+            "suspicious_cmds": int(result.get("suspicious_commands", result.get("suspicious_cmds", 0))),
+            "duration_seconds": float(result.get("duration_seconds", 0.0)),
+            "signal": result.get("signal", ""),
             ** (pipeline_info or {})
         }
     )

@@ -1,6 +1,6 @@
 import React from 'react';
 
-const Header = ({ settings, isAttacked, time, liveLog }) => {
+const Header = ({ settings, isAttacked, time, liveLog, onEndAttack }) => {
   return (
     <header className="header-pro-container" style={{
       display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center',
@@ -9,7 +9,7 @@ const Header = ({ settings, isAttacked, time, liveLog }) => {
       position: 'fixed', top: 0, left: 0, right: 0, height: '90px', zIndex: 10000,
       pointerEvents: 'all'
     }}>
-      <div className="h-left" style={{ textAlign: 'left' }}>
+      <div className="h-left" style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
         <div style={{fontSize: '10px', color: '#00ff41', opacity: 0.6, letterSpacing: '1px'}}>PROTOCOL: {settings.encryptionType}</div>
         <div style={{
           fontSize: '14px', fontWeight: 'bold', marginTop: '5px', 
@@ -18,6 +18,27 @@ const Header = ({ settings, isAttacked, time, liveLog }) => {
         }}>
           {isAttacked ? "!! SYSTEM_BREACH_ACTIVE" : `// ${settings.securityLevel}_STABLE`}
         </div>
+        {isAttacked && (
+          <button
+            onClick={onEndAttack}
+            style={{
+              marginTop: '6px',
+              padding: '5px 14px',
+              background: '#ff0000',
+              color: '#ffffff',
+              border: '1px solid #ffffff',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: '900',
+              fontFamily: 'monospace',
+              cursor: 'pointer',
+              boxShadow: '0 0 12px rgba(255, 0, 0, 0.9)',
+              letterSpacing: '1px'
+            }}
+          >
+            🛑 END ATTACK NOW
+          </button>
+        )}
       </div>
 
       <div className="h-center" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>

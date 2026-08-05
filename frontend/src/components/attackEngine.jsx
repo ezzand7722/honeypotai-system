@@ -32,6 +32,7 @@ export const createTestAttack = () => {
   const country = geoParts[1] || "UN";
 
   const attackId = 'EV-' + Math.floor(Math.random() * 90000 + 10000);
+  const sharedIp = generateRandomIP(); // single IP used for both src_ip and ip
   return {
     id: attackId,
     sfxId: `SFX-${attackId}`, // معرف صوت منفصل لكل هجمة
@@ -40,8 +41,8 @@ export const createTestAttack = () => {
     type: randomThreat.type,
     attack: randomThreat.type,
     attack_type: randomThreat.type,
-    src_ip: generateRandomIP(),
-    ip: generateRandomIP(),
+    src_ip: sharedIp,
+    ip: sharedIp,
     port: randomThreat.port,
     proto: randomThreat.proto,
     loc: randomGeo.loc,
@@ -52,8 +53,8 @@ export const createTestAttack = () => {
     coords: { lat: randomGeo.lat, lng: randomGeo.lng },
     status: 'DETECTED & LOGGED',
     packetSize: '1500 MTU',
-    isp: 'Global Edge Telecom',
-    reputation: 'MALICIOUS (9.8/10)',
+    isp: 'Unknown',
+    reputation: 'MALICIOUS',
     livePayload: '124.5 MB/s',
     // إضافة الحقول الجديدة
     connection_count: Math.floor(Math.random() * 500 + 50),

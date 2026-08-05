@@ -28,6 +28,56 @@ const menuItems = [
   { id: 'config', label: 'SETTINGS', Component: Icons.Config },
 ];
 
+/**
+ * Maps an AI v2 attack_context record to the internal attack card format
+ * used by the frontend dashboard.
+ */
+function mapAttackContextToCard(ctx) {
+  const severityMap = {
+    'Extreme': 'CRITICAL', 'High': 'HIGH',
+    'Medium': 'MEDIUM', 'Mild': 'LOW', 'Low': 'LOW'
+  };
+  return {
+    id: ctx.attack_id,
+    attack_context_id: ctx.attack_id,
+    ip: ctx.src_ip,
+    type: ctx.attack_type || 'Unknown',
+    severity: severityMap[ctx.severity] || 'MEDIUM',
+    severityRaw: ctx.severity,
+    status: ctx.attack_status === 'ended' ? 'MITIGATED' :
+            ctx.attack_status === 'ongoing' ? 'ACTIVE' : 'DETECTED',
+    attack_status: ctx.attack_status,
+    connectionCount: ctx.connection_count || 0,
+    failedCount: ctx.failed_count || 0,
+    successCount: ctx.success_count || 0,
+    uniquePasswords: ctx.unique_passwords || 0,
+    commandCount: ctx.command_count || 0,
+    suspiciousCmds: ctx.suspicious_cmds || 0,
+    durationSeconds: ctx.duration_seconds || 0,
+    severityScore: ctx.severity_score || 50,
+    severityColor: ctx.severity_color || '#ffd60a',
+    isActive: ctx.is_active !== false,
+    timestamp: ctx.last_seen_time || ctx.start_time || new Date().toISOString(),
+    signal: ctx.signal || '',
+    // Legacy fields for compatibility with existing components
+    source: ctx.src_ip,
+    vector: ctx.attack_type,
+    details: {
+      attack_type: ctx.attack_type,
+      attack_status: ctx.attack_status,
+      severity: ctx.severity,
+      src_ip: ctx.src_ip,
+      connection_count: ctx.connection_count,
+      success_count: ctx.success_count,
+      failed_count: ctx.failed_count,
+      unique_passwords: ctx.unique_passwords,
+      command_count: ctx.command_count,
+      suspicious_cmds: ctx.suspicious_cmds,
+      duration_seconds: ctx.duration_seconds,
+    }
+  };
+}
+
 function App() {
   const [isGateOpen, setIsGateOpen] = useState(false);
   const [isAttacked, setIsAttacked] = useState(false);
@@ -227,7 +277,7 @@ function App() {
               freshAlerts.forEach(alert => {
             const alertId = alert.attack_id || alert.id || ('EV-' + alert.src_ip + '-' + alert.attack_type);
 
-            const receivedAtRaw = alert.first_seen || alert?.details?.received_at;
+            const receivedAtRaw = alert.ingested_at || alert?.details?.received_at || alert.first_seen;
             let receivedAtMs = NaN;
             let utcRa = '';
             
@@ -461,6 +511,49 @@ function App() {
     const interval = setInterval(fetchWrapper, 2000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── Poll /ai/attack-context (AI v2 normalized output) ──
+  useEffect(() => {
+    const fetchAttackContext = async () => {
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        const res = await fetch(`${backendUrl}/ai/attack-context?limit=50&_t=${Date.now()}`, {
+          headers: { 'Cache-Control': 'no-store' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status === 'success' && Array.isArray(data.attack_contexts)) {
+          data.attack_contexts.forEach(ctx => {
+            // Map attack_context to the internal attack card format
+            const mapped = mapAttackContextToCard(ctx);
+            if (ctx.attack_status === 'ended') {
+              // Remove from active attacks, add to history
+              setActiveAttacks(prev => prev.filter(a => a.attack_context_id !== ctx.attack_id));
+              addToHistory({ ...mapped, status: 'MITIGATED' });
+            } else if (ctx.attack_status === 'new' || ctx.attack_status === 'ongoing') {
+              setActiveAttacks(prev => {
+                const exists = prev.find(a => a.attack_context_id === ctx.attack_id);
+                if (exists) {
+                  // Update in-place
+                  return prev.map(a => a.attack_context_id === ctx.attack_id ? { ...a, ...mapped } : a);
+                }
+                // New attack — add it
+                return [mapped, ...prev];
+              });
+              // Add to history too
+              addToHistory(mapped);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('[attack-context] fetch error:', e);
+      }
+    };
+
+    fetchAttackContext(); // immediate
+    const interval = setInterval(fetchAttackContext, 5000);
+    return () => clearInterval(interval);
+  }, [addToHistory]);
 
   useEffect(() => {
     let liveInterval;

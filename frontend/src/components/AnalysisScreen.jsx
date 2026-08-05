@@ -6,7 +6,9 @@ const AnalysisScreen = ({ onClose, isAttacked, activeAttack, activeAttacks = [],
   const [logs, setLogs] = useState([`> INITIALIZING_DEEP_SCAN_ON_VECTOR_${attackIndex}...`]);
   const logEndRef = useRef(null);
 
-  const activeTargets = getCombinedActiveAttacks({ activeTestAttack: isAttacked ? activeAttack : null, activeAttacks }).filter(Boolean);
+  const activeTargets = isAttacked
+    ? getCombinedActiveAttacks({ activeTestAttack: activeAttack, activeAttacks }).filter(Boolean)
+    : [];
   const targetSignature = activeTargets.map((attack) => `${attack?.ip || ''}|${attack?.loc || ''}|${attack?.type || ''}`).join('||');
 
   useEffect(() => {

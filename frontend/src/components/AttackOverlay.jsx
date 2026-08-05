@@ -36,6 +36,7 @@ const AttackOverlay = ({
   onDetailView,
   onCloseOverlay,
   onHideOverlay,
+  onEndAttack,
   toggleAttack, 
   setCurrentScreen,
   alertSuppressed,
@@ -62,6 +63,20 @@ const AttackOverlay = ({
 
   // --- الحل الجذري: استخدام Ref كقفل (Lock) لضمان الإنهاء التام ---
   const hasTerminated = useRef(false);
+
+  // Function to immediately terminate and end the active attack
+  const handleEndAttackClick = (e) => {
+    if (e) e.stopPropagation();
+    console.log("System: User manually triggered End Attack.");
+    hasTerminated.current = true;
+    if (onEndAttack) {
+      onEndAttack();
+    } else if (toggleAttack) {
+      toggleAttack();
+    } else {
+      onCloseOverlay?.();
+    }
+  };
 
   // وظيفة الإغلاق الصارم: توقف الهجمة، الصوت، وتمنع العودة
   const handleHardClose = (e) => {
@@ -226,11 +241,41 @@ const AttackOverlay = ({
               <div className="alert-main-box" style={{ fontSize: '4rem', fontWeight: '900', margin: '20px 0' }}>
                 ATTACK_DETECTED
               </div>
-              <div className="alert-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', padding: '0 20px' }}>
-                <span>SOURCE_IP: {mainAlertIp}</span>
-                {doubleAttackMode && (
-                  <span style={{ color: '#00ff41', opacity: 0.85, fontSize: '12px' }}>DUAL VECTOR ATTACK STILL ACTIVE</span>
-                )}
+              <div className="alert-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff', padding: '0 20px', flexDirection: 'column', gap: '15px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                  <span>SOURCE_IP: {mainAlertIp}</span>
+                  {doubleAttackMode && (
+                    <span style={{ color: '#00ff41', opacity: 0.85, fontSize: '12px' }}>DUAL VECTOR ATTACK STILL ACTIVE</span>
+                  )}
+                </div>
+                <button 
+                  onClick={handleEndAttackClick}
+                  style={{
+                    padding: '16px 36px',
+                    background: '#ff0000',
+                    color: '#ffffff',
+                    border: '2px solid #ffffff',
+                    fontWeight: '900',
+                    fontSize: '18px',
+                    cursor: 'pointer',
+                    letterSpacing: '3px',
+                    boxShadow: '0 0 35px rgba(255, 0, 0, 0.95)',
+                    borderRadius: '4px',
+                    fontFamily: 'monospace',
+                    transition: 'all 0.2s ease',
+                    pointerEvents: 'all'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#ff3333';
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#ff0000';
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  🛑 END ATTACK NOW (MITIGATE BREACH)
+                </button>
               </div>
             </div>
           </div>
@@ -241,10 +286,27 @@ const AttackOverlay = ({
       {currentScreen === 'double_attack' && activeAttackCount >= 2 && (
         <div className="sub-screen-overlay" style={{ overflowY: 'auto', paddingBottom: '40px' }}>
           <button className="close-btn-lg" onClick={handleHardClose}>×</button>
-          <div className="screen-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="glitch-red" style={{ color: '#ff0000', textAlign: 'center', marginBottom: '30px', flex: 1 }}>
+          <div className="screen-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+            <h2 className="glitch-red" style={{ color: '#ff0000', textAlign: 'center', margin: 0, flex: 1 }}>
               {` >>> MULTIPLE_VECTOR_ANALYSIS (${activeAttackCount} ATTACKS) <<< `}
             </h2>
+            <button
+              onClick={handleEndAttackClick}
+              style={{
+                padding: '10px 20px',
+                background: '#ff0000',
+                color: '#ffffff',
+                border: '2px solid #ffffff',
+                fontWeight: '900',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                letterSpacing: '1px',
+                boxShadow: '0 0 15px rgba(255,0,0,0.8)',
+                borderRadius: '4px'
+              }}
+            >
+              🛑 END ALL ATTACKS NOW
+            </button>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '25px', padding: '20px' }}>
@@ -260,6 +322,7 @@ const AttackOverlay = ({
                     key={activeTestAttack.id} 
                     isAttacked={true} 
                     attackerCoords={activeTestAttack.coords} 
+                    attackerData={activeTestAttack}
                     customWidth={activeAttackCount > 3 ? 350 : 460} 
                     customHeight={280} 
                   />
@@ -352,6 +415,7 @@ const AttackOverlay = ({
                   OPEN VECTOR_01 DETAILS
                 </button>
               </div>
+            )}
           </div>
 
         </div>
@@ -425,6 +489,7 @@ const AttackOverlay = ({
                 key={attackToShow.id} 
                 isAttacked={true} 
                 attackerCoords={attackToShow.coords} 
+                attackerData={attackToShow}
                 customWidth={650} 
                 customHeight={500} 
               />
@@ -488,7 +553,26 @@ const AttackOverlay = ({
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '20px' }}>
-                <button className="action-btn" style={{ marginTop: '30px' }} onClick={() => {
+                <button 
+                  onClick={handleEndAttackClick}
+                  style={{
+                    marginTop: '20px',
+                    padding: '14px 20px',
+                    background: '#ff0000',
+                    color: '#ffffff',
+                    border: '2px solid #ffffff',
+                    fontWeight: '900',
+                    fontSize: '15px',
+                    cursor: 'pointer',
+                    letterSpacing: '2px',
+                    boxShadow: '0 0 20px rgba(255, 0, 0, 0.9)',
+                    borderRadius: '4px',
+                    fontFamily: 'monospace'
+                  }}
+                >
+                  🛑 END ATTACK NOW (MITIGATE BREACH)
+                </button>
+                <button className="action-btn" style={{ marginTop: '10px' }} onClick={() => {
                   setSummaryAttacks([attackToShow]);
                   setCurrentScreen('attack_summary');
                 }}>
@@ -514,7 +598,7 @@ const AttackOverlay = ({
           <div style={{ display: 'flex', gap: '20px', height: '420px', flexShrink: 0, marginBottom: '20px' }}>
             <div style={{ flex: '1', display: 'flex', flexDirection: 'column', border: '1px solid #00ff41', background: '#000', padding: '10px' }}>
               <div style={{ flex: 1, overflow: 'hidden' }}>
-                <LiveMap isAttacked={true} attackerCoords={activeSummaryAttacks[0]?.coords} customWidth={450} customHeight={330} />
+                <LiveMap isAttacked={true} attackerCoords={activeSummaryAttacks[0]?.coords} attackerData={activeSummaryAttacks[0]} customWidth={450} customHeight={330} />
               </div>
               <div style={{ marginTop: '15px', padding: '0 10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#00ff41', marginBottom: '5px' }}>
@@ -599,10 +683,29 @@ const AttackOverlay = ({
             </div>
           </div>
 
-          <div style={{ flexShrink: 0, marginTop: '20px' }}>
-            <div style={{ width: '100%', padding: '18px', background: 'rgba(0, 255, 65, 0.04)', border: '1px dashed rgba(0,255,65,0.2)', color: '#00ff41', textAlign: 'center', fontSize: '14px' }}>
-                {heuristicProgress >= 100 ? "THREAT PURGED | AUTO-TERMINATING TEST SESSION..." : "ATTACK WILL END AUTOMATICALLY WHEN PROGRESS HITS 100%"}
+          <div style={{ flexShrink: 0, marginTop: '20px', display: 'flex', gap: '15px', alignItems: 'center' }}>
+            <div style={{ flex: 1, padding: '14px', background: 'rgba(0, 255, 65, 0.04)', border: '1px dashed rgba(0,255,65,0.2)', color: '#00ff41', textAlign: 'center', fontSize: '13px' }}>
+                {heuristicProgress >= 100 ? "THREAT PURGED | AUTO-TERMINATING TEST SESSION..." : "ATTACK PROGRESS: " + (heuristicProgress || 0).toFixed(0) + "%"}
             </div>
+            <button 
+              onClick={handleEndAttackClick}
+              style={{
+                padding: '14px 28px',
+                background: '#ff0000',
+                color: '#ffffff',
+                border: '2px solid #ffffff',
+                fontWeight: '900',
+                fontSize: '14px',
+                cursor: 'pointer',
+                letterSpacing: '2px',
+                boxShadow: '0 0 20px rgba(255, 0, 0, 0.9)',
+                borderRadius: '4px',
+                fontFamily: 'monospace',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              🛑 END ATTACK NOW
+            </button>
           </div>
         </div>
       )}
