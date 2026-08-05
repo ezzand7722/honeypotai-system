@@ -140,12 +140,11 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 severity = prediction.severity
 
         src_ip = str(event.source_ip)
-        pipeline_id = record.get("pipeline_id") or "unknown_pipeline"
-        group_key = f"{src_ip}|{pipeline_id}"
+        group_key = f"{src_ip}|{attack_type}"
 
         if group_key not in groups:
             groups[group_key] = {
-                "id": f"AGG-{src_ip}-{pipeline_id}",
+                "id": f"AGG-{src_ip}-{attack_type}",
                 "first_seen": event.first_seen.timestamp(),
                 "last_seen": event.first_seen.timestamp(),
                 "last_received_at": received_at,
