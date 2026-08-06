@@ -213,7 +213,7 @@ async def ingest_honeypot_events_from_file(
             events = [normalize_event(item) for item in raw_records]
             raw_logs = [item.model_dump(mode="json") for item in raw_records]
 
-            for index, event in enumerate(events):
+            async def _persist_single(index, event):
                 try:
                     await asyncio.to_thread(
                         record_alert,
@@ -225,6 +225,10 @@ async def ingest_honeypot_events_from_file(
                     )
                 except Exception as e:
                     logger.error("RECORD_ALERT_ERROR_BG pipeline_id=%s event_id=%s error=%s", pipeline_id, event.event_id, e)
+
+            # Persist all alerts in parallel to dramatically reduce Supabase network round-trip overhead
+            tasks = [_persist_single(index, event) for index, event in enumerate(events)]
+            await asyncio.gather(*tasks)
 
             await submit_batch_for_scoring(events, raw_logs, pipeline_id, chunk_size_val)
             logger.info("FILE_INGEST_BG_COMPLETE pipeline_id=%s", pipeline_id)

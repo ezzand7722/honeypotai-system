@@ -194,7 +194,7 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
 
 async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[str, Any]] = None) -> None:
     formatted_log = _format_log_for_ai(original_log) if original_log is not None else event.model_dump(mode="json")
-    persist_log_stage(event.event_id, "ai_normalized", formatted_log)
+    await asyncio.to_thread(persist_log_stage, event.event_id, "ai_normalized", formatted_log)
 
     log.info("SUBMIT_TO_AI: event_id=%s src_ip=%s", event.event_id, formatted_log.get("src_ip"))
 
@@ -226,8 +226,12 @@ async def submit_batch_for_scoring(
         for chunk_index, event_chunk in enumerate(chunked_events):
             raw_chunk = chunked_logs[chunk_index] if chunk_index < len(chunked_logs) else []
             formatted_chunk = [_format_log_for_ai(raw_log) for raw_log in raw_chunk]
+            
+            # Parallelize database logging of staging stages to improve latency
+            tasks = []
             for event, formatted_log in zip(event_chunk, formatted_chunk):
-                persist_log_stage(event.event_id, "ai_normalized", formatted_log)
+                tasks.append(asyncio.to_thread(persist_log_stage, event.event_id, "ai_normalized", formatted_log))
+            await asyncio.gather(*tasks)
 
             pipeline_info = {
                 "pipeline_id": effective_pipeline_id,
@@ -239,10 +243,13 @@ async def submit_batch_for_scoring(
                 results_by_ip = await _run_ai_script(formatted_chunk)
                 mark_chunk_sent(effective_pipeline_id, len(event_chunk))
 
+                # Parallelize database prediction attachments
+                tasks = []
                 for event, formatted_log in zip(event_chunk, formatted_chunk):
                     result = results_by_ip.get(formatted_log.get("src_ip", ""), {})
                     prediction = _build_prediction(event.event_id, formatted_log, result, pipeline_info)
-                    await asyncio.to_thread(attach_prediction, event.event_id, prediction)
+                    tasks.append(asyncio.to_thread(attach_prediction, event.event_id, prediction))
+                await asyncio.gather(*tasks)
 
             except Exception as exc:
                 log.error("AI chunk scoring failed for pipeline %s chunk %s: %s", effective_pipeline_id, chunk_index, exc)
