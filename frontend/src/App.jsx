@@ -38,6 +38,9 @@ function mapAttackContextToCard(ctx) {
     'Extreme': 'CRITICAL', 'High': 'HIGH',
     'Medium': 'MEDIUM', 'Mild': 'LOW', 'Low': 'LOW'
   };
+  const seed = ctx.src_ip ? ctx.src_ip.split(".").reduce((a,b)=>a+(parseInt(b,10)||0),0) : 0;
+  const geo = GEO_POOL[seed % GEO_POOL.length] || { loc: 'Unknown, UN', lat: 0, lng: 0 };
+
   return {
     id: ctx.attack_id,
     attack_context_id: ctx.attack_id,
@@ -63,7 +66,15 @@ function mapAttackContextToCard(ctx) {
 
     timestamp: ctx.last_seen_time || ctx.start_time || new Date().toISOString(),
     signal: ctx.signal || '',
+
+    // Geo mapping for LiveMap
+    loc: geo.loc,
+    city: geo.loc.split(',')[0] || 'Unknown',
+    country: geo.loc.split(',')[1]?.trim() || 'UN',
+    coords: { lat: geo.lat, lng: geo.lng },
+    
     // Legacy fields for compatibility with existing components
+    eventTimeline: [],
     source: ctx.src_ip,
     vector: ctx.attack_type,
     details: {
@@ -395,8 +406,8 @@ function App() {
               suspicious_commands: prediction.suspicious_commands ?? alert.details?.suspicious_commands ?? 0
             };
             
-            addToHistory(mappedAttack);
-              
+            // addToHistory(mappedAttack); // Disabled so basic alerts don't pollute history. Only AI contexts will appear.
+            
             const isNewAlert = !seenAlertToken.current.has(alertId);
             
             if (isNewAlert) {
@@ -450,17 +461,24 @@ function App() {
                       progress: currTest?.progress ?? mappedAttack.progress 
                     };
                   } else {
+                    // Enrich existing AI contexts instead of spawning basic fake cards!
                     setActiveAttacksWrapper(prev => {
-                      const next = prev.filter(a => a.id !== mappedAttack.id);
-                      const existing = prev.find(a => a.id === mappedAttack.id);
-                      return [{ 
-                        ...mappedAttack, 
-                        ...(existing || {}), 
-                        timestamp: new Date().toLocaleTimeString(), 
-                        startTime: existing?.startTime ?? mappedAttack.startTime, 
-                        duration: existing?.duration ?? mappedAttack.duration, 
-                        progress: existing?.progress ?? mappedAttack.progress 
-                      }, ...next];
+                      return prev.map(a => {
+                        // Match basic alert to AI context by IP
+                        if (a.ip === mappedAttack.ip || a.src_ip === mappedAttack.ip) {
+                          const newTimeline = mappedAttack.eventTimeline || [];
+                          const existingTimeline = a.eventTimeline || [];
+                          // simple dedup by timestamp
+                          const mergedTimeline = [...existingTimeline, ...newTimeline].filter((v,i,arr)=>arr.findIndex(t=>(t.timestamp===v.timestamp))===i);
+                          
+                          return { 
+                            ...a, 
+                            eventTimeline: mergedTimeline,
+                            commands_used: mergedTimeline.map(e => e.details?.command || e.details?.input).filter(Boolean),
+                          };
+                        }
+                        return a;
+                      });
                     });
                     return currTest;
                   }
