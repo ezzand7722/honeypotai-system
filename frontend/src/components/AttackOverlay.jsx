@@ -141,14 +141,14 @@ const AttackOverlay = ({
   }, [isAttacked, currentScreen]);
 
   // الانتقال التلقائي من attack_details إلى attack_summary بعد 10 ثوان
-  useEffect(() => {
-    if (currentScreen === 'attack_details' && isAttacked) {
-      const autoTransitionTimer = setTimeout(() => {
-        setCurrentScreen('attack_summary');
-      }, 10000); // 10 ثوان
-      return () => clearTimeout(autoTransitionTimer);
-    }
-  }, [currentScreen, isAttacked, setCurrentScreen]);
+  // useEffect(() => {
+  //   if (currentScreen === 'attack_details' && isAttacked) {
+  //     const autoTransitionTimer = setTimeout(() => {
+  //       setCurrentScreen('attack_summary');
+  //     }, 10000); // 10 ثوان
+  //     return () => clearTimeout(autoTransitionTimer);
+  //   }
+  // }, [currentScreen, isAttacked, setCurrentScreen]);
 
   useEffect(() => {
     if (currentScreen !== 'attack_summary') {

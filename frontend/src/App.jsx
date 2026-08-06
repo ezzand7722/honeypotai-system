@@ -647,13 +647,13 @@ function App() {
     let timer;
     if (isAttacked && currentScreen === 'main' && showOverlay) {
       timer = setTimeout(() => {
-        const totalAttacks = getActiveAttackCount({ activeTestAttack, activeAttacks });
-
-        if (totalAttacks >= 2) {
-          setCurrentScreen('double_attack');
-        } else if (activeTestAttack || activeAttacks.length === 1) {
-          setCurrentScreen('attack_details');
-        }
+        // Disabled automatic screen changes to prevent interrupting the user's active view
+        // const totalAttacks = getActiveAttackCount({ activeTestAttack, activeAttacks });
+        // if (totalAttacks >= 2) {
+        //   setCurrentScreen('double_attack');
+        // } else if (activeTestAttack || activeAttacks.length === 1) {
+        //   setCurrentScreen('attack_details');
+        // }
 
         // Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰/Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø© Ø¥Ø°Ø§ Ù„Ù… ÙŠØªÙ… Ø¹Ø±Ø¶Ù‡
         const combinedAttacks = getCombinedActiveAttacks({ activeTestAttack, activeAttacks });
