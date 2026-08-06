@@ -56,8 +56,11 @@ function mapAttackContextToCard(ctx) {
     suspiciousCmds: ctx.suspicious_cmds || 0,
     durationSeconds: ctx.duration_seconds || 0,
     severityScore: ctx.severity_score || 50,
+    threat: ctx.severity_score || 50,
     severityColor: ctx.severity_color || '#ffd60a',
     isActive: ctx.is_active !== false,
+    date: ctx.last_seen_time ? new Date(ctx.last_seen_time).toLocaleString() : new Date().toLocaleString(),
+
     timestamp: ctx.last_seen_time || ctx.start_time || new Date().toISOString(),
     signal: ctx.signal || '',
     // Legacy fields for compatibility with existing components
@@ -230,7 +233,7 @@ function App() {
           } catch (e) { }
           console.info('[honeypot] backendUrl =', backendUrl);
         }
-        const res = await fetch(`${backendUrl}/report/alerts?limit=15&_t=${Date.now()}`, {
+        const res = await fetch(`${backendUrl}/report/alerts?limit=100&_t=${Date.now()}`, {
           headers: {
             'X-Shared-Secret': 'default-shared-secret',
             'Cache-Control': 'no-store, no-cache, must-revalidate',
