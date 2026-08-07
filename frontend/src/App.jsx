@@ -71,7 +71,7 @@ function mapAttackContextToCard(ctx) {
     loc: ctx.location || 'MISSING',
     city: (ctx.location || 'MISSING').split(',')[0] || 'MISSING',
     country: (ctx.location || 'MISSING').split(',')[1]?.trim() || 'MISSING',
-    coords: { lat: ctx.latitude || 0, lng: ctx.longitude || 0 },
+    coords: (ctx.latitude != null && ctx.longitude != null) ? { lat: ctx.latitude, lng: ctx.longitude } : null,
     
     // Legacy fields for compatibility with existing components
     eventTimeline: [],
@@ -669,7 +669,7 @@ function App() {
     return () => clearTimeout(timer);
   }, [isAttacked, currentScreen, showOverlay, activeAttacks.length, activeTestAttack?.id, playFemaleAlert]);
 
-  const finalizeAttackAndSave = useCallback(() => {
+  const finalizeAttackAndSave = useCallback(async () => {
     if (isFinalizing.current) return;
     isFinalizing.current = true;
 
@@ -681,17 +681,31 @@ function App() {
     }
 
     const savedAttacks = [];
-    // Ø§Ø­ÙØ¸ Ø¬Ù…ÙŠØ¹ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ù†Ø´Ø·Ø© (Ø³ÙˆØ§Ø¡ ÙƒØ§Ù†Øª Ù…Ù† activeAttacks Ø£Ùˆ activeTestAttack)
+    const endPromises = [];
+    
+    const endAttackOnBackend = async (id) => {
+      try {
+        await fetch(`/api/ai/attack-context/${id}/end`, { method: 'POST' });
+      } catch (err) {
+        console.error('Failed to end attack on backend:', err);
+      }
+    };
+
+    // Ø§Ø­Ù Ø¸ Ø¬Ù…ÙŠØ¹ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ù†Ø´Ø·Ø© (Ø³ÙˆØ§Ø¡ ÙƒØ§Ù†Øª Ù…Ù† activeAttacks Ø£Ùˆ activeTestAttack)
     if (activeAttacks.length > 0) {
       activeAttacks.forEach(attack => {
         discardedAlertIds.current.add(attack.id);
         savedAttacks.push({ ...attack, status: 'MITIGATED' });
+        endPromises.push(endAttackOnBackend(attack.id));
       });
     }
     if (activeTestAttack && !activeAttacks.some(a => a.id === activeTestAttack.id)) {
       discardedAlertIds.current.add(activeTestAttack.id);
       savedAttacks.push({ ...activeTestAttack, status: 'MITIGATED' });
+      endPromises.push(endAttackOnBackend(activeTestAttack.id));
     }
+
+    await Promise.all(endPromises);
 
     if (savedAttacks.length > 0) savedAttacks.forEach(attack => addToHistory(attack));
     isSpeaking.current = false;

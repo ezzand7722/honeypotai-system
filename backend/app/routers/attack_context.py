@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.services.persistence import load_recent_attack_contexts
+from app.services.persistence import load_recent_attack_contexts, _connect_postgres
 
 router = APIRouter()
 log = logging.getLogger("honeypot.attack_context")
@@ -209,6 +209,34 @@ def get_attack_context(attack_id: str) -> Dict[str, Any]:
             return {"status": "success", "attack_context": normalize_ai_output_for_frontend(row)}
     return {"status": "not_found", "attack_context": None}
 
+
+
+
+@router.post("/attack-context/{attack_id}/end")
+def end_attack_context(attack_id: str) -> Dict[str, Any]:
+    """Manually end an attack session server-side."""
+    conn = None
+    try:
+        conn = _connect_postgres()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE public.attack_context SET attack_status = 'ended', ended_time = NOW() WHERE attack_id = %s",
+                (attack_id,)
+            )
+            conn.commit()
+            
+        # Also remove from live contexts if it exists there
+        if attack_id in _live_contexts:
+            _live_contexts[attack_id]["attack_status"] = "ended"
+            _live_contexts[attack_id]["is_active"] = False
+            
+        return {"status": "success", "message": f"Attack {attack_id} ended"}
+    except Exception as e:
+        log.error(f"Failed to end attack {attack_id}: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        if conn:
+            conn.close()
 
 # ─── WebSocket Endpoint ───────────────────────────────────────────────────────
 

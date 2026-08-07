@@ -229,8 +229,8 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                       ['LOCATION', (selectedHistory.loc || selectedHistory.city || 'MISSING').toUpperCase(), ''],
                       ['TARGET_PORT', selectedHistory.port || '37777', ''],
                       ['ATTACK_TYPE', selectedHistory.attack_type || selectedHistory.type, '#ff9900'],
-                      ['THREAT_LEVEL (severity)', `${selectedHistory.threat || selectedHistory.severity}`, '#ff0000'],
-                      ['COORDINATES', `${selectedHistory.coords?.lat}, ${selectedHistory.coords?.lng}`, ''],
+                      ['THREAT_LEVEL (severity)', selectedHistory.severity || 'MISSING', '#ff0000'],
+                      ['COORDINATES', selectedHistory.coords ? `${selectedHistory.coords.lat}, ${selectedHistory.coords.lng}` : '', ''],
                       ['AI_MITIGATION', selectedHistory.status || 'LOGGED', '#00ff41']
                     ].map(([label, value, color], i) => (
                       <tr key={i} style={{ borderBottom: '1px solid rgba(0,255,65,0.1)' }}>
@@ -262,12 +262,12 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <tbody>
                     {[
-                      ['CONNECTION_COUNT', selectedHistory.connection_count || 0, '#ffaa00'],
-                      ['SUCCESS_COUNT', selectedHistory.success_count || 0, '#00ff41'],
-                      ['FAILED_COUNT', selectedHistory.failed_count || 0, '#ff5555'],
-                      ['UNIQUE_PASSWORDS', selectedHistory.unique_passwords || 0, '#ffaa00'],
-                      ['COMMAND_COUNT', selectedHistory.command_count || 0, '#ff6666'],
-                      ['SUSPICIOUS_COMMANDS', selectedHistory.suspicious_commands || 0, '#ff0000']
+                      ['CONNECTION_COUNT', selectedHistory.connectionCount ?? selectedHistory.connection_count ?? 0, '#ffaa00'],
+                      ['SUCCESS_COUNT', selectedHistory.successCount ?? selectedHistory.success_count ?? 0, '#00ff41'],
+                      ['FAILED_COUNT', selectedHistory.failedCount ?? selectedHistory.failed_count ?? 0, '#ff5555'],
+                      ['UNIQUE_PASSWORDS', selectedHistory.uniquePasswords ?? selectedHistory.unique_passwords ?? 0, '#ffaa00'],
+                      ['COMMAND_COUNT', selectedHistory.commandCount ?? selectedHistory.command_count ?? 0, '#ff6666'],
+                      ['SUSPICIOUS_COMMANDS', selectedHistory.suspiciousCmds ?? selectedHistory.suspicious_commands ?? 0, '#ff0000']
                     ].map(([label, value, color], i) => (
                       <tr key={i} style={{ borderBottom: '1px solid rgba(0,255,65,0.1)' }}>
                         <td style={{ padding: '10px 0', opacity: 0.5, fontSize: '12px' }}>{label}</td>

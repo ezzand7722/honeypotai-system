@@ -378,12 +378,12 @@ const AttackOverlay = ({
                     <div><strong>ISP:</strong> <span style={{fontSize: '11px'}}>{activeTestAttack.isp || 'MISSING'}</span></div>
                   </div>
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,0,0,0.15)', fontSize: '11px', color: '#ccc' }}>
-                    <div><strong>CONNECTION_COUNT:</strong> {activeTestAttack.connection_count || 0}</div>
-                    <div><strong>SUCCESS_COUNT:</strong> {activeTestAttack.success_count || 0}</div>
-                    <div><strong>FAILED_COUNT:</strong> {activeTestAttack.failed_count || 0}</div>
-                    <div><strong>UNIQUE_PASSWORDS:</strong> {activeTestAttack.unique_passwords || 0}</div>
-                    <div><strong>COMMAND_COUNT:</strong> {activeTestAttack.command_count || 0}</div>
-                    <div><strong>SUSPICIOUS_COMMANDS:</strong> {activeTestAttack.suspicious_commands || 0}</div>
+                    <div><strong>CONNECTION_COUNT:</strong> {activeTestAttack.connectionCount ?? activeTestAttack.connection_count ?? 0}</div>
+                    <div><strong>SUCCESS_COUNT:</strong> {activeTestAttack.successCount ?? activeTestAttack.success_count ?? 0}</div>
+                    <div><strong>FAILED_COUNT:</strong> {activeTestAttack.failedCount ?? activeTestAttack.failed_count ?? 0}</div>
+                    <div><strong>UNIQUE_PASSWORDS:</strong> {activeTestAttack.uniquePasswords ?? activeTestAttack.unique_passwords ?? 0}</div>
+                    <div><strong>COMMAND_COUNT:</strong> {activeTestAttack.commandCount ?? activeTestAttack.command_count ?? 0}</div>
+                    <div><strong>SUSPICIOUS_CMDS:</strong> {activeTestAttack.suspiciousCmds ?? activeTestAttack.suspicious_commands ?? 0}</div>
                   </div>
                 </div>
 
@@ -520,12 +520,12 @@ const AttackOverlay = ({
               
               <table className="cyber-table" style={{ width: '100%', color: '#fff', marginTop: '10px' }}>
                 <tbody style={{ fontSize: '14px' }}>
-                  <tr><td style={{ padding: '8px 0' }}>CONNECTION_COUNT</td><td className="yellow-txt" style={{ fontWeight: 'bold' }}>{attackToShow.connection_count || 0}</td></tr>
-                  <tr><td style={{ padding: '8px 0' }}>SUCCESS_COUNT</td><td style={{ color: '#00ff41' }}>{attackToShow.success_count || 0}</td></tr>
-                  <tr><td style={{ padding: '8px 0' }}>FAILED_COUNT</td><td className="red-txt">{attackToShow.failed_count || 0}</td></tr>
-                  <tr><td style={{ padding: '8px 0' }}>UNIQUE_PASSWORDS</td><td style={{ color: '#ffaa00' }}>{attackToShow.unique_passwords || 0}</td></tr>
-                  <tr><td style={{ padding: '8px 0' }}>COMMAND_COUNT</td><td style={{ color: '#ff6666' }}>{attackToShow.command_count || 0}</td></tr>
-                  <tr><td style={{ padding: '8px 0' }}>SUSPICIOUS_COMMANDS</td><td className="red-txt" style={{ fontWeight: 'bold' }}>{attackToShow.suspicious_commands || 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>CONNECTION_COUNT</td><td className="yellow-txt" style={{ fontWeight: 'bold' }}>{attackToShow.connectionCount ?? attackToShow.connection_count ?? 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>SUCCESS_COUNT</td><td style={{ color: '#00ff41' }}>{attackToShow.successCount ?? attackToShow.success_count ?? 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>FAILED_COUNT</td><td className="red-txt">{attackToShow.failedCount ?? attackToShow.failed_count ?? 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>UNIQUE_PASSWORDS</td><td style={{ color: '#ffaa00' }}>{attackToShow.uniquePasswords ?? attackToShow.unique_passwords ?? 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>COMMAND_COUNT</td><td style={{ color: '#ff6666' }}>{attackToShow.commandCount ?? attackToShow.command_count ?? 0}</td></tr>
+                  <tr><td style={{ padding: '8px 0' }}>SUSPICIOUS_CMDS</td><td className="red-txt" style={{ fontWeight: 'bold' }}>{attackToShow.suspiciousCmds ?? attackToShow.suspicious_commands ?? 0}</td></tr>
                 </tbody>
               </table>
 
@@ -606,9 +606,9 @@ const AttackOverlay = ({
                   <span>{activeSummaryAttacks.length}</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '11px', color: '#ccc' }}>
-                  <div><strong className="yellow-txt">TOTAL_CONNECTIONS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.connection_count || 0), 0)}</div></div>
-                  <div><strong className="yellow-txt">TOTAL_FAILS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.failed_count || 0), 0)}</div></div>
-                  <div><strong className="yellow-txt">TOTAL_SUCCESS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.success_count || 0), 0)}</div></div>
+                  <div><strong className="yellow-txt">TOTAL_CONNECTIONS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.connectionCount ?? a.connection_count ?? 0), 0)}</div></div>
+                  <div><strong className="yellow-txt">TOTAL_FAILS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.failedCount ?? a.failed_count ?? 0), 0)}</div></div>
+                  <div><strong className="yellow-txt">TOTAL_SUCCESS</strong><div>{activeSummaryAttacks.reduce((sum, a) => sum + (a.successCount ?? a.success_count ?? 0), 0)}</div></div>
                   <div><strong className="yellow-txt">AVG THREAT</strong><div>{activeSummaryAttacks.length ? `${Math.round(activeSummaryAttacks.reduce((sum, a) => sum + Number((a.threat || '0').replace('%', '')) || 0, 0) / activeSummaryAttacks.length)}%` : '0%'}</div></div>
                 </div>
               </div>
