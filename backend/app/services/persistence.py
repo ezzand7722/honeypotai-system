@@ -253,8 +253,9 @@ def upsert_attack_context(ai_output: dict) -> None:
                         attack_id, src_ip, attack_type, attack_status, severity,
                         connection_count, failed_count, success_count,
                         unique_passwords, command_count, suspicious_cmds,
-                        start_time, last_seen_time, ended_time
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s)
+                        start_time, last_seen_time, ended_time,
+                        location, latitude, longitude
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s)
                     ON CONFLICT (src_ip, attack_type) DO UPDATE SET
                         attack_status     = CASE 
                                                 WHEN EXCLUDED.attack_status = 'ended' THEN 'ended'
@@ -280,6 +281,9 @@ def upsert_attack_context(ai_output: dict) -> None:
                     connection_count, failed_count, success_count,
                     unique_passwords, command_count, suspicious_cmds,
                     ended_time,
+                    ai_output.get("location"),
+                    ai_output.get("latitude"),
+                    ai_output.get("longitude"),
                 ))
             conn.commit()
             log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
@@ -298,8 +302,9 @@ def upsert_attack_context(ai_output: dict) -> None:
                     attack_id, src_ip, attack_type, attack_status, severity,
                     connection_count, failed_count, success_count,
                     unique_passwords, command_count, suspicious_cmds,
-                    start_time, last_seen_time, ended_time
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    start_time, last_seen_time, ended_time,
+                    location, latitude, longitude
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (attack_id) DO UPDATE SET
                     attack_status     = excluded.attack_status,
                     severity          = excluded.severity,
@@ -316,6 +321,9 @@ def upsert_attack_context(ai_output: dict) -> None:
                 connection_count, failed_count, success_count,
                 unique_passwords, command_count, suspicious_cmds,
                 now, now, ended_time,
+                ai_output.get("location"),
+                ai_output.get("latitude"),
+                ai_output.get("longitude"),
             ))
             conn.commit()
             log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
@@ -336,7 +344,8 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                     SELECT attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds,
-                           start_time, last_seen_time, ended_time
+                           start_time, last_seen_time, ended_time,
+                           location, latitude, longitude
                     FROM public.attack_context
                     ORDER BY last_seen_time DESC
                     LIMIT %s
@@ -356,7 +365,8 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                     SELECT attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds,
-                           start_time, last_seen_time, ended_time
+                           start_time, last_seen_time, ended_time,
+                           location, latitude, longitude
                     FROM attack_context
                     ORDER BY last_seen_time DESC
                     LIMIT ?

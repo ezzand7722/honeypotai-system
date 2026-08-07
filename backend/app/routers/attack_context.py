@@ -103,6 +103,10 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
         "start_time":        start_time,
         "last_seen_time":    last_seen,
         "ended_time":        ended_time,
+        # Geo
+        "location":         raw.get("location"),
+        "latitude":         raw.get("latitude"),
+        "longitude":        raw.get("longitude"),
         # Signals
         "signal":            signal,
     }
