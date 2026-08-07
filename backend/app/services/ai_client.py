@@ -292,6 +292,11 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
 
 async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[str, Any]] = None) -> None:
     formatted_log = _format_log_for_ai(original_log) if original_log is not None else event.model_dump(mode="json")
+    if event.metadata:
+        meta = formatted_log.setdefault("metadata", {})
+        meta.setdefault("location", event.metadata.get("location"))
+        meta.setdefault("latitude", event.metadata.get("latitude"))
+        meta.setdefault("longitude", event.metadata.get("longitude"))
     await asyncio.to_thread(persist_log_stage, event.event_id, "ai_normalized", formatted_log)
 
     log.info("SUBMIT_TO_AI: event_id=%s src_ip=%s", event.event_id, formatted_log.get("src_ip"))
