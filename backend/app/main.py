@@ -27,6 +27,12 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.error(f"Failed to load historical alerts on start: {e}")
 
+    try:
+        from app.services.ai_client import sweep_expired_sessions_db
+        sweep_expired_sessions_db()
+    except Exception as e:
+        logger.error(f"Failed to run database session sweep on start: {e}")
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.time()

@@ -8,7 +8,7 @@ class RawHoneypotRecord(BaseModel):
     attack_id: str
     timestamp: datetime
     source_ip: IPvAnyAddress
-    destination_ip: IPvAnyAddress
+    destination_ip: Optional[IPvAnyAddress] = None
     destination_port: int
     attack_vector: str
     metadata: Mapping[str, Any] = Field(default_factory=dict)
@@ -17,27 +17,29 @@ class RawHoneypotRecord(BaseModel):
 
 class EnrichedEvent(BaseModel):
     event_id: str
+    attack_id: Optional[str] = None
     source_ip: IPvAnyAddress
-    destination_ip: IPvAnyAddress
+    destination_ip: Optional[IPvAnyAddress] = None
     destination_port: int
-    attack_vector: str
-    severity: Literal["low", "medium", "high"]
+    attack_vector: Optional[str] = None
+    severity: Optional[Literal["low", "medium", "high"]] = None
     risk_score: float = Field(ge=0, le=1)
     first_seen: datetime
     payload: Optional[str] = None
     metadata: Mapping[str, Any]
 
     @validator("severity", pre=True)
-    def normalize_severity(cls, value: str) -> str:
-        return value.lower()
+    def normalize_severity(cls, value: Optional[str]) -> Optional[str]:
+        return value.lower() if value else None
 
 
 class AiPrediction(BaseModel):
     event_id: Optional[str] = None
-    model_version: str = "unknown"
+    attack_id: Optional[str] = None
+    model_version: Optional[str] = None
     attacker_ip: Optional[IPvAnyAddress] = None
     src_ip: Optional[IPvAnyAddress] = None  # New field from updated AI response
-    threat_level: Literal["low", "medium", "high", "unknown"] = "unknown"
+    threat_level: Optional[Literal["low", "medium", "high"]] = None
     risk_score: float = Field(default=0.5, ge=0, le=1)
     labels: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0, le=1)
@@ -58,9 +60,9 @@ class AiPrediction(BaseModel):
     severity: Optional[str] = None
 
     @validator("threat_level", pre=True)
-    def normalize_threat_level(cls, value: Optional[str]) -> str:
+    def normalize_threat_level(cls, value: Any) -> Optional[str]:
         if not value:
-            return "unknown"
+            return None
 
         normalized = str(value).lower()
         if normalized in {"high", "critical", "severe", "red"}:
@@ -69,4 +71,4 @@ class AiPrediction(BaseModel):
             return "medium"
         if normalized in {"low", "minor", "green", "info"}:
             return "low"
-        return "unknown"
+        return None

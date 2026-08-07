@@ -14,7 +14,7 @@ export const processDahuaLogs = (isShieldActive = false) => {
         .filter(log => log.src_ip && log.eventid === "cowrie.command.input")
         .map(log => ({
             // تحويل الـ Local لـ IP خارجي للسينما (الحفاظ على منطقك الأصلي)
-            ip: log.src_ip === "127.0.0.1" ? "185.234.21.11" : log.src_ip, 
+            ip: log.src_ip, 
             command: log.input,
             session: log.session,
             timestamp: log.timestamp,

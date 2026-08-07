@@ -52,7 +52,7 @@ Get-Content -Path $LogFile | ForEach-Object {
 
     $attackId = if ($raw.uuid) { [string]$raw.uuid } elseif ($raw.session) { [string]$raw.session } else { "line-$($sent + 1)" }
     $srcIp = if ($raw.src_ip) { [string]$raw.src_ip } elseif ($raw.source_ip) { [string]$raw.source_ip } else { "127.0.0.1" }
-    $dstIp = if ($raw.dst_ip) { [string]$raw.dst_ip } elseif ($raw.destination_ip) { [string]$raw.destination_ip } else { "127.0.0.1" }
+    $dstIp = if ($raw.dst_ip) { [string]$raw.dst_ip } elseif ($raw.destination_ip) { [string]$raw.destination_ip } else { $null }
     $dstPort = if ($raw.dst_port) { [int]$raw.dst_port } elseif ($raw.destination_port) { [int]$raw.destination_port } else { 0 }
     if ($ForceHighThreat) {
         $dstPort = 22

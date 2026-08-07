@@ -5,7 +5,7 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
   const [selectedHistory, setSelectedHistory] = useState(null);
 
   const titleText = selectedHistory 
-    ? `INCIDENT REPORT — ${selectedHistory.date || selectedHistory.timestamp || 'UNKNOWN'}` 
+    ? `INCIDENT REPORT — ${selectedHistory.date || selectedHistory.timestamp || 'MISSING'}` 
     : "ATTACK HISTORY ARCHIVE";
 
   return (
@@ -204,7 +204,7 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                 />
               </div>
               <div style={{ position: 'absolute', top: '20px', left: '20px', fontSize: '12px', background: 'rgba(0,10,0,0.85)', padding: '10px 15px', borderLeft: '3px solid #ffaa00' }}>
-                ATTACK ORIGIN: <span style={{ color: '#ffaa00', fontWeight: 'bold' }}>{(selectedHistory.loc || selectedHistory.city || 'Unknown').toUpperCase()}</span>
+                ATTACK ORIGIN: <span style={{ color: '#ffaa00', fontWeight: 'bold' }}>{(selectedHistory.loc || selectedHistory.city || 'MISSING').toUpperCase()}</span>
               </div>
             </div>
 
@@ -224,9 +224,9 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                   <tbody>
                     {[
                       ['SOURCE_IP (src_ip)', selectedHistory.ip || selectedHistory.src_ip, '#ffaa00'],
-                      ['NETWORK_ISP', selectedHistory.isp || 'Unknown', ''],
+                      ['NETWORK_ISP', selectedHistory.isp || 'MISSING', ''],
                       ['PROTOCOL', selectedHistory.proto || 'UDP', ''],
-                      ['LOCATION', (selectedHistory.loc || selectedHistory.city || 'Unknown').toUpperCase(), ''],
+                      ['LOCATION', (selectedHistory.loc || selectedHistory.city || 'MISSING').toUpperCase(), ''],
                       ['TARGET_PORT', selectedHistory.port || '37777', ''],
                       ['ATTACK_TYPE', selectedHistory.attack_type || selectedHistory.type, '#ff9900'],
                       ['THREAT_LEVEL (severity)', `${selectedHistory.threat || selectedHistory.severity}`, '#ff0000'],

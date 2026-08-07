@@ -16,12 +16,12 @@ class Settings(BaseSettings):
     ai_chunk_pause_ms: int = 0
     database_url: Optional[str] = None
     database_path: str = "data/honeypot_events.db"
+    geoip_db_path: str = "data/GeoLite2-City.mmdb"
 
     model_config = SettingsConfigDict(
-        env_file=(
-            str(Path(__file__).resolve().parents[1] / ".env"),
-            ".env",
-        )
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
     )
 
 

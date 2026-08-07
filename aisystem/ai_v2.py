@@ -14,9 +14,10 @@ SUSPICIOUS_CMDS = [
 ]
 
 class DynamicAttackTracker:
-    def __init__(self, expiry_seconds=10.0, callback_on_ended=None):
+    def __init__(self, expiry_seconds=10.0, callback_on_ended=None, db_lookup_callback=None):
         self.expiry_seconds = expiry_seconds
         self.callback_on_ended = callback_on_ended
+        self.db_lookup_callback = db_lookup_callback
         self.context_table = {}
         self.lock = threading.Lock()
 
@@ -60,7 +61,7 @@ class DynamicAttackTracker:
         else:
             df["normalized_ip"] = df.apply(
                 lambda r: next((re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v)).group(0)
-                                for v in r.values if re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v))), "127.0.0.1"),
+                                for v in r.values if re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v))), None),
                 axis=1
             )
 
@@ -111,6 +112,16 @@ class DynamicAttackTracker:
                 pwd_values.update([p for p in valid_pwds if p.strip() and p.lower() != "nan"])
 
             uniq_pwd = len(pwd_values)
+            
+            # Extract explicit attack type if available
+            explicit_type = None
+            for col in ["attack_vector", "attack_type", "type"]:
+                if col in group.columns:
+                    valid_types = group[col].dropna().astype(str).tolist()
+                    valid_types = [t for t in valid_types if t.strip() and t.lower() != "nan" and t.lower() != "unknown"]
+                    if valid_types:
+                        explicit_type = valid_types[0]
+                        break
 
             extracted.append({
                 "src_ip": ip,
@@ -119,7 +130,8 @@ class DynamicAttackTracker:
                 "failed_count": total_fails,
                 "unique_passwords": uniq_pwd,
                 "command_count": cmd_c,
-                "suspicious_commands": susp_c
+                "suspicious_commands": susp_c,
+                "explicit_type": explicit_type
             })
 
         return pd.DataFrame(extracted)
@@ -129,12 +141,17 @@ class DynamicAttackTracker:
         failed = row["failed_count"]
         success = row["success_count"]
         cmds = row["command_count"]
+        explicit = row.get("explicit_type")
 
         if conn >= 8 and failed == 0 and success == 0 and cmds == 0:
             return "DDoS"
         if conn > cmds and failed == 0 and success == 0:
             return "DDoS"
-        return "Brute Force"
+        
+        if explicit and not explicit.lower().startswith("cowrie."):
+            return explicit
+            
+        return None
 
     def calculate_severity(self, row, ongoing_duration=0.0):
         score = 0
@@ -198,26 +215,53 @@ class DynamicAttackTracker:
                     ctx["severity"] = sev
                     ctx["status"] = status
                 else:
-                    status = "new"
-                    duration = 0.0
-                    sev = self.calculate_severity(row, ongoing_duration=duration)
+                    # Check if there is an active session in the database first to ensure stability across restarts
+                    db_ctx = None
+                    if self.db_lookup_callback:
+                        db_ctx = self.db_lookup_callback(ip, a_type)
 
-                    ctx = {
-                        "attack_id": str(uuid.uuid4()),
-                        "src_ip": ip,
-                        "attack_type": a_type,
-                        "status": "ongoing",
-                        "severity": sev,
-                        "connection_count": int(row["connection_count"]),
-                        "success_count": int(row["success_count"]),
-                        "failed_count": int(row["failed_count"]),
-                        "unique_passwords": int(row["unique_passwords"]),
-                        "command_count": int(row["command_count"]),
-                        "suspicious_commands": int(row["suspicious_commands"]),
-                        "start_time": now,
-                        "last_seen": now
-                    }
-                    self.context_table[context_key] = ctx
+                    if db_ctx:
+                        status = "ongoing"
+                        final_a_type = a_type if a_type else db_ctx.get("attack_type")
+                        ctx = {
+                            "attack_id": db_ctx["attack_id"],
+                            "src_ip": ip,
+                            "attack_type": final_a_type,
+                            "status": "ongoing",
+                            "connection_count": db_ctx["connection_count"] + int(row["connection_count"]),
+                            "success_count": db_ctx["success_count"] + int(row["success_count"]),
+                            "failed_count": db_ctx["failed_count"] + int(row["failed_count"]),
+                            "unique_passwords": max(db_ctx["unique_passwords"], int(row["unique_passwords"])),
+                            "command_count": db_ctx["command_count"] + int(row["command_count"]),
+                            "suspicious_commands": db_ctx["suspicious_commands"] + int(row["suspicious_commands"]),
+                            "start_time": db_ctx["start_time"],
+                            "last_seen": now
+                        }
+                        duration = now - ctx["start_time"]
+                        ctx["severity"] = self.calculate_severity(ctx, ongoing_duration=duration)
+                        self.context_table[context_key] = ctx
+                    else:
+                        status = "new"
+                        duration = 0.0
+                        sev = self.calculate_severity(row, ongoing_duration=duration)
+                        final_a_type = a_type if a_type else "Unknown"
+
+                        ctx = {
+                            "attack_id": str(uuid.uuid4()),
+                            "src_ip": ip,
+                            "attack_type": final_a_type,
+                            "status": "ongoing",
+                            "severity": sev,
+                            "connection_count": int(row["connection_count"]),
+                            "success_count": int(row["success_count"]),
+                            "failed_count": int(row["failed_count"]),
+                            "unique_passwords": int(row["unique_passwords"]),
+                            "command_count": int(row["command_count"]),
+                            "suspicious_commands": int(row["suspicious_commands"]),
+                            "start_time": now,
+                            "last_seen": now
+                        }
+                        self.context_table[context_key] = ctx
 
                 out_payload = {
                     "attack_id": ctx["attack_id"],

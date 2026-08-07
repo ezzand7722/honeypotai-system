@@ -48,7 +48,7 @@ const AttackOverlay = ({
   const combinedAttacks = useMemo(() => getCombinedActiveAttacks({ activeTestAttack, activeAttacks }), [activeTestAttack, activeAttacks]);
   const activeAttackCount = combinedAttacks.length;
   const attackToShow = detailAttack || activeTestAttack;
-  const mainAlertIp = lastAttackForAlert?.ip || activeTestAttack?.ip || (combinedAttacks.length > 0 ? combinedAttacks[combinedAttacks.length - 1].ip : "UNKNOWN");
+  const mainAlertIp = lastAttackForAlert?.ip || activeTestAttack?.ip || (combinedAttacks.length > 0 ? combinedAttacks[combinedAttacks.length - 1].ip : "MISSING");
   const activeSummaryAttacks = summaryAttacks || combinedAttacks;
 
   // --- حالات البيانات المباشرة (Metrics) ---
@@ -375,7 +375,7 @@ const AttackOverlay = ({
                     <div><strong>VECTOR:</strong> <span style={{ color: '#ff4444' }}>{activeTestAttack.type}</span></div>
                     <div><strong>THREAT:</strong> <span style={{ color: '#ff4444' }}>{activeTestAttack.threat}</span></div>
                     <div><strong>STATUS:</strong> <span style={{ color: '#00ff41' }}>{activeTestAttack.status}</span></div>
-                    <div><strong>ISP:</strong> <span style={{fontSize: '11px'}}>{activeTestAttack.isp || 'Unknown'}</span></div>
+                    <div><strong>ISP:</strong> <span style={{fontSize: '11px'}}>{activeTestAttack.isp || 'MISSING'}</span></div>
                   </div>
                   <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid rgba(255,0,0,0.15)', fontSize: '11px', color: '#ccc' }}>
                     <div><strong>CONNECTION_COUNT:</strong> {activeTestAttack.connection_count || 0}</div>
@@ -620,7 +620,7 @@ const AttackOverlay = ({
                 <div style={{ fontSize: '14px', color: '#ccc', lineHeight: '1.7' }}>
                   <p>ATTACKS ACTIVE: <span style={{ color: '#fff' }}>{activeSummaryAttacks.length}</span></p>
                   <p>TOTAL PAYLOAD LOAD: <span style={{ color: '#fff' }}>{activeSummaryAttacks.reduce((sum, a) => sum + (Number(a.livePayload?.replace(' MB/s', '')) || 0), 0).toFixed(1)} MB/s</span></p>
-                  <p>TOP THREAT VECTOR: <span style={{ color: '#fff' }}>{activeSummaryAttacks[0]?.type || 'UNKNOWN'}</span></p>
+                  <p>TOP THREAT VECTOR: <span style={{ color: '#fff' }}>{activeSummaryAttacks[0]?.type || 'MISSING'}</span></p>
                   <p className="red-txt" style={{ marginTop: '20px', fontWeight: 'bold' }}>RESULT: MULTI-VECTOR ANALYSIS</p>
                 </div>
               </div>
@@ -645,16 +645,16 @@ const AttackOverlay = ({
                 {activeSummaryAttacks.map((attack, idx) => (
                   <div key={attack.id} style={{ padding: '14px', border: '1px solid rgba(0,255,65,0.2)', background: '#010901' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', color: '#00ff41', fontWeight: 'bold' }}>
-                      <span>{`VECTOR_${String(idx + 1).padStart(2, '0')} ${attack.type?.substring(0, 16) || 'UNKNOWN'}`}</span>
-                      <span>{attack.threat || 'UNKNOWN'}</span>
+                      <span>{`VECTOR_${String(idx + 1).padStart(2, '0')} ${attack.type?.substring(0, 16) || 'MISSING'}`}</span>
+                      <span>{attack.threat || 'MISSING'}</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', color: '#ccc', fontSize: '12px' }}>
-                      <div><strong>IP:</strong> <span>{attack.ip || attack.src_ip || 'UNKNOWN'}</span></div>
-                      <div><strong>LOC:</strong> <span>{attack.loc || 'UNKNOWN'}</span></div>
-                      <div><strong>PROTO:</strong> <span>{attack.proto || 'UNKNOWN'}</span></div>
-                      <div><strong>PORT:</strong> <span>{attack.port || 'UNKNOWN'}</span></div>
-                      <div><strong>STATUS:</strong> <span>{attack.status || 'UNKNOWN'}</span></div>
-                      <div><strong>PAYLOAD:</strong> <span>{attack.livePayload || 'UNKNOWN'}</span></div>
+                      <div><strong>IP:</strong> <span>{attack.ip || attack.src_ip || 'MISSING'}</span></div>
+                      <div><strong>LOC:</strong> <span>{attack.loc || 'MISSING'}</span></div>
+                      <div><strong>PROTO:</strong> <span>{attack.proto || 'MISSING'}</span></div>
+                      <div><strong>PORT:</strong> <span>{attack.port || 'MISSING'}</span></div>
+                      <div><strong>STATUS:</strong> <span>{attack.status || 'MISSING'}</span></div>
+                      <div><strong>PAYLOAD:</strong> <span>{attack.livePayload || 'MISSING'}</span></div>
                     </div>
                   </div>
                 ))}

@@ -11,6 +11,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import json
 import logging
 from typing import Any, Dict, List, Optional
@@ -34,7 +35,7 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
     Maps field aliases and ensures all expected keys are present.
     """
     attack_status = raw.get("attack_status", raw.get("status", "new"))
-    severity = raw.get("severity", "Low")
+    severity = raw.get("severity")
 
     # Severity → numeric score for frontend progress bars
     severity_score = {
@@ -50,12 +51,40 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
     signal = raw.get("signal", "")
     is_ended = attack_status == "ended" or signal == "STOP_SENDING_LOGS"
 
+    last_seen = raw.get("last_seen_time")
+    if last_seen and not isinstance(last_seen, str):
+        try:
+            last_seen = last_seen.isoformat()
+        except AttributeError:
+            last_seen = str(last_seen)
+    elif not last_seen:
+        last_seen = None
+
+    start_time = raw.get("start_time", raw.get("last_seen_time"))
+    if start_time and not isinstance(start_time, str):
+        try:
+            start_time = start_time.isoformat()
+        except AttributeError:
+            start_time = str(start_time)
+    elif not start_time:
+        start_time = None
+
+    ended_time = raw.get("ended_time")
+    if ended_time and not isinstance(ended_time, str):
+        try:
+            ended_time = ended_time.isoformat()
+        except AttributeError:
+            ended_time = str(ended_time)
+    elif not ended_time:
+        ended_time = None
+
     return {
         # Core IDs
         "attack_id":       raw.get("attack_id", ""),
         "src_ip":          raw.get("src_ip", ""),
-        # Attack classification
-        "attack_type":     raw.get("attack_type", "Unknown"),
+        # AI prediction mapped schema
+        "attack_type":     raw.get("attack_type"),
+        "threat_level":    str(raw.get("severity", "")).lower() or None,
         "attack_status":   "ended" if is_ended else attack_status,
         "is_active":       not is_ended,
         # Severity
@@ -71,9 +100,9 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
         "suspicious_cmds":    int(raw.get("suspicious_commands", raw.get("suspicious_cmds", 0))),
         # Timing
         "duration_seconds":  float(raw.get("duration_seconds", 0.0)),
-        "start_time":        raw.get("start_time", raw.get("last_seen_time", "")),
-        "last_seen_time":    raw.get("last_seen_time", ""),
-        "ended_time":        raw.get("ended_time", None),
+        "start_time":        start_time,
+        "last_seen_time":    last_seen,
+        "ended_time":        ended_time,
         # Signals
         "signal":            signal,
     }
@@ -135,10 +164,7 @@ def list_attack_contexts(
                 **row,
                 "suspicious_cmds": row.get("suspicious_cmds", 0)
             })
-    # Override with live data
-    for aid, ctx in _live_contexts.items():
-        merged[aid] = ctx
-
+    # Override with live data - REMOVED because it bypasses DB state transitions (like renewed)
     results = list(merged.values())
 
     # Apply status filter
@@ -146,7 +172,7 @@ def list_attack_contexts(
         results = [r for r in results if r["attack_status"] == status]
 
     # Sort by last_seen_time desc, then by severity_score desc
-    results.sort(key=lambda x: (x.get("last_seen_time", ""), x.get("severity_score", 0)), reverse=True)
+    results.sort(key=lambda x: (x.get("last_seen_time") or "", x.get("severity_score", 0)), reverse=True)
 
     return {
         "status": "success",
@@ -163,11 +189,8 @@ def list_active_attacks() -> Dict[str, Any]:
     for row in db_rows:
         aid = row.get("attack_id", "")
         status = row.get("attack_status", "")
-        if aid and status in ("new", "ongoing"):
+        if aid and status in ("new", "ongoing", "renewed"):
             merged[aid] = normalize_ai_output_for_frontend(row)
-    for aid, ctx in _live_contexts.items():
-        if ctx.get("is_active"):
-            merged[aid] = ctx
 
     results = sorted(merged.values(), key=lambda x: x.get("severity_score", 0), reverse=True)
     return {"status": "success", "count": len(results), "attack_contexts": results}

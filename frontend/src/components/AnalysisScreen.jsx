@@ -40,7 +40,7 @@ const AnalysisScreen = ({ onClose, isAttacked, activeAttack, activeAttacks = [],
     setLogs((prev) => {
       const nextLogs = [...prev];
       activeTargets.forEach((attack, index) => {
-        const msg = `> TRACKING_VECTOR_${index + 1}: ${attack?.ip || 'UNKNOWN'} @ ${attack?.loc || 'UNKNOWN'}`;
+        const msg = `> TRACKING_VECTOR_${index + 1}: ${attack?.ip || 'MISSING'} @ ${attack?.loc || 'MISSING'}`;
         if (!nextLogs.includes(msg)) {
           nextLogs.push(msg);
         }
@@ -104,11 +104,11 @@ const AnalysisScreen = ({ onClose, isAttacked, activeAttack, activeAttacks = [],
             {activeTargets.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 {activeTargets.map((attack, index) => (
-                  <div key={`${attack?.ip || 'unknown'}-${index}`} style={{ borderLeft: `2px solid ${dynamicColor}66`, paddingLeft: '10px', fontSize: '12px', lineHeight: '1.8' }}>
+                  <div key={`${attack?.ip || 'missing'}-${index}`} style={{ borderLeft: `2px solid ${dynamicColor}66`, paddingLeft: '10px', fontSize: '12px', lineHeight: '1.8' }}>
                     <div style={{ color: '#ffff00', fontWeight: 'bold', marginBottom: '4px' }}>VECTOR_0{index + 1}</div>
-                    <div><span style={{ opacity: 0.6 }}>IP:</span> <span style={{ color: '#ffff00' }}>{attack?.ip || 'UNKNOWN'}</span></div>
-                    <div><span style={{ opacity: 0.6 }}>LOC:</span> {attack?.loc || 'UNKNOWN'}</div>
-                    <div><span style={{ opacity: 0.6 }}>TYPE:</span> {attack?.type || 'UNKNOWN'}</div>
+                    <div><span style={{ opacity: 0.6 }}>IP:</span> <span style={{ color: '#ffff00' }}>{attack?.ip || 'MISSING'}</span></div>
+                    <div><span style={{ opacity: 0.6 }}>LOC:</span> {attack?.loc || 'MISSING'}</div>
+                    <div><span style={{ opacity: 0.6 }}>TYPE:</span> {attack?.type || 'MISSING'}</div>
                   </div>
                 ))}
               </div>
@@ -166,7 +166,7 @@ const AnalysisScreen = ({ onClose, isAttacked, activeAttack, activeAttacks = [],
                 const y = 50 + Math.sin(angle) * radiusPercent;
 
                 return (
-                  <div key={`${attack?.ip || 'unknown'}-${index}`} className="threat-target" style={{
+                  <div key={`${attack?.ip || 'missing'}-${index}`} className="threat-target" style={{
                     background: '#ffff00',
                     boxShadow: '0 0 20px #ffff00',
                     top: `${y}%`,

@@ -17,14 +17,13 @@ import { sfx } from './logic/SFXEngine';
 import { getActiveAttackCount, getCombinedActiveAttacks, splitPrimaryAndSecondaryAttacks } from './logic/attackState';
 
 import './App.css';
-import { initialHistoryData, GEO_POOL } from './data/attackData';
+import { initialHistoryData } from './data/attackData';
 
 const menuItems = [
   { id: 'live', label: 'LIVE THREATS', Component: Icons.Live },
   { id: 'network', label: 'NETWORK', Component: Icons.Network },
   { id: 'history', label: 'ATTACK HISTORY', Component: Icons.History },
   { id: 'analysis', label: 'ANALYSIS', Component: Icons.Analysis },
-  { id: 'post_incident', label: 'COMPARISON', Component: Icons.Comparison },
   { id: 'raw_ai', label: 'RAW AI OUTPUT', Component: Icons.RawData },
   { id: 'config', label: 'SETTINGS', Component: Icons.Config },
 ];
@@ -35,20 +34,21 @@ const menuItems = [
  */
 function mapAttackContextToCard(ctx) {
   const severityMap = {
-    'Extreme': 'CRITICAL', 'High': 'HIGH',
-    'Medium': 'MEDIUM', 'Mild': 'LOW', 'Low': 'LOW'
+    'Extreme': 'EXTREME', 'High': 'HIGH',
+    'Medium': 'MEDIUM', 'Mild': 'LOW', 'Low': 'LOW',
+    'Missing': 'MISSING'
   };
-  const seed = ctx.src_ip ? ctx.src_ip.split(".").reduce((a,b)=>a+(parseInt(b,10)||0),0) : 0;
-  const geo = GEO_POOL[seed % GEO_POOL.length] || { loc: 'Unknown, UN', lat: 0, lng: 0 };
 
+  // Convert an attack_context record to the format needed by the UI
   return {
     id: ctx.attack_id,
     attack_context_id: ctx.attack_id,
     ip: ctx.src_ip,
-    type: ctx.attack_type || 'Unknown',
-    severity: severityMap[ctx.severity] || 'MEDIUM',
-    severityRaw: ctx.severity,
+    type: ctx.attack_type || 'Missing',
+    severity: severityMap[ctx.severity] || (ctx.severity ? String(ctx.severity).toUpperCase() : 'MISSING'),
+    severityRaw: ctx.severity || 'Missing',
     status: ctx.attack_status === 'ended' ? 'MITIGATED' :
+            ctx.attack_status === 'renewed' ? 'RENEWED' :
             ctx.attack_status === 'ongoing' ? 'ACTIVE' : 'DETECTED',
     attack_status: ctx.attack_status,
     connectionCount: ctx.connection_count || 0,
@@ -68,10 +68,10 @@ function mapAttackContextToCard(ctx) {
     signal: ctx.signal || '',
 
     // Geo mapping for LiveMap
-    loc: geo.loc,
-    city: geo.loc.split(',')[0] || 'Unknown',
-    country: geo.loc.split(',')[1]?.trim() || 'UN',
-    coords: { lat: geo.lat, lng: geo.lng },
+    loc: ctx.location || 'MISSING',
+    city: (ctx.location || 'MISSING').split(',')[0] || 'MISSING',
+    country: (ctx.location || 'MISSING').split(',')[1]?.trim() || 'MISSING',
+    coords: { lat: ctx.latitude || 0, lng: ctx.longitude || 0 },
     
     // Legacy fields for compatibility with existing components
     eventTimeline: [],
@@ -171,12 +171,12 @@ function App() {
   }, [settings.alertVolume]);
 
   const playFemaleAlert = useCallback(() => {
-    // Ø¥Ø°Ø§ ÙƒØ§Ù† Ù‡Ù†Ø§Ùƒ Ù†Ø·Ù‚ Ø¬Ø§Ø±Ù Ø£Ùˆ Ø§Ù„ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ù…ÙƒØªÙˆÙ…Ø©ØŒ Ø§Ø®Ø±Ø¬ ÙÙˆØ±Ø§Ù‹
+    // Ø¥Ø°Ø§ ÙƒØ§Ù† Ù‡Ù†Ø§Ùƒ Ù†Ø·Ù‚ Ø¬Ø§Ø±Ù  Ø£Ùˆ Ø§Ù„ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ù…ÙƒØªÙˆÙ…Ø©ØŒ Ø§Ø®Ø±Ø¬ Ù ÙˆØ±Ø§Ù‹
     if (isSpeaking.current || alertSuppressed || !showOverlay) return;
 
     const currentAttack = lastAttackForAlert;
 
-    // Ø¥Ø°Ø§ Ù„Ù… ÙŠÙˆØ¬Ø¯ Ù‡Ø¬ÙˆÙ… Ø£Ùˆ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‚Ø¯ Ø¹ÙØ±Ø¶ Ø¨Ø§Ù„ÙØ¹Ù„ Ù„Ù‡Ø°Ù‡ Ø§Ù„Ù‡Ø¬Ù…Ø©ØŒ Ù„Ø§ ØªÙØ¹Ù„ Ø´ÙŠØ¦Ø§Ù‹
+    // Ø¥Ø°Ø§ Ù„Ù… ÙŠÙˆØ¬Ø¯ Ù‡Ø¬ÙˆÙ… Ø£Ùˆ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‚Ø¯ Ø¹Ù Ø±Ø¶ Ø¨Ø§Ù„Ù Ø¹Ù„ Ù„Ù‡Ø°Ù‡ Ø§Ù„Ù‡Ø¬Ù…Ø©ØŒ Ù„Ø§ ØªÙ Ø¹Ù„ Ø´ÙŠØ¦Ø§Ù‹
     if (!currentAttack || alertShownForAttackIds.current.has(currentAttack.id)) return;
 
     // ÙˆØ¶Ø¹ Ø¹Ù„Ø§Ù…Ø© Ø¹Ù„Ù‰ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø£Ù†Ù‡ ØªÙ… Ø¹Ø±Ø¶ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„Ù‡Ø§
@@ -206,7 +206,7 @@ function App() {
       if (femaleVoice) detailMsg.voice = femaleVoice;
 
       detailMsg.onend = () => {
-        isSpeaking.current = false; // ØªØ­Ø±ÙŠØ± Ø§Ù„Ù‚ÙÙ„ Ø¹Ù†Ø¯ Ø§Ù„Ø§Ù†ØªÙ‡Ø§Ø¡ ØªÙ…Ø§Ù…Ø§Ù‹
+        isSpeaking.current = false; // ØªØ­Ø±ÙŠØ± Ø§Ù„Ù‚Ù Ù„ Ø¹Ù†Ø¯ Ø§Ù„Ø§Ù†ØªÙ‡Ø§Ø¡ ØªÙ…Ø§Ù…Ø§Ù‹
       };
 
       window.speechSynthesis.speak(detailMsg);
@@ -306,9 +306,6 @@ function App() {
             const lastSeenSeconds = Number(alert.last_seen ?? alert.timestamp ?? alert.first_seen ?? 0) || 0;
             const instanceCount = Number(alert.instance_count ?? 0) || 0;
 
-            // We removed the token-duplicate check so that repeated uploads of the exact same test file
-            // will always trigger the active attack sirens on the dashboard instead of being silently ignored.
-
             const dateStr = Number.isFinite(receivedAtMs)
               ? new Date(receivedAtMs).toISOString().replace('T', ' ').split('.')[0]
               : (alert.timestamp
@@ -317,7 +314,7 @@ function App() {
 
             const timeline = [];
             const timeStr = dateStr.split(' ')[1] || "00:00:00";
-            const targetPort = alert.dest_port || alert.details?.dest_port || "Unknown";
+            const targetPort = alert.dest_port || alert.details?.dest_port || "Missing";
             
             const pipelineData = alert.pipeline || alert.details?.pipeline;
 
@@ -339,7 +336,7 @@ function App() {
                 });
             } else {
                 timeline.push({ time: timeStr, event: `INBOUND CONNECTION DETECTED ON PORT ${targetPort}`, status: 'warning' });
-                timeline.push({ time: timeStr, event: `AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'UNKNOWN'}`, status: 'critical' });
+                timeline.push({ time: timeStr, event: `AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'MISSING'}`, status: 'critical' });
                 if (alert.details?.explanation) {
                     timeline.push({ time: timeStr, event: `AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`, status: 'critical' });
                 } else if (alert.details?.command) {
@@ -352,42 +349,39 @@ function App() {
                 if (alert.details?.connection_count > 0) {
                     timeline.push({ time: timeStr, event: `CONNECTIONS_TRACKED: ${alert.details.connection_count} | FAILED: ${alert.details.failed_count || 0}`, status: 'critical' });
                 }
-                timeline.push({ time: timeStr, event: `ATTACKER IP ${alert.src_ip || 'Unknown'} BLACKLISTED`, status: 'success' });
+                timeline.push({ time: timeStr, event: `ATTACKER IP ${alert.src_ip || 'Missing'} BLACKLISTED`, status: 'success' });
                 timeline.push({ time: timeStr, event: `SESSION PURGED | LOGGING INCIDENT`, status: 'success' });
             }
 
-            // --- DIAGNOSTIC LOGGING TO BROWSER CONSOLE ---
             console.group(`%c[DIAGNOSTIC] Alert ID: ${alertId}`, 'color: #00ff41; font-weight: bold; background: #000; padding: 2px 6px;');
             console.log('Raw Backend Alert:', alert);
             console.log('AI Pipeline Timeline (from ai.py):', alert.details?.pipeline || 'No pipeline found in alert.details');
             console.log('Final Mapped eventTimeline:', timeline);
             console.groupEnd();
 
-            const seed = alert.src_ip ? alert.src_ip.split(".").reduce((a,b)=>a+(parseInt(b,10)||0),0) : 0;
-            const geo = GEO_POOL[seed % GEO_POOL.length] || { loc: 'Unknown, UN', lat: 0, lng: 0 };
-            const severityVal = alert.details?.severity || alert.severity || 'high';
-            const severityStr = severityVal.toUpperCase();
+            const severityVal = alert.details?.severity || alert.severity || 'Missing';
+            const severityStr = severityVal ? String(severityVal).toUpperCase() : 'Missing';
 
             const prediction = alert.details?.prediction || {};
             const mappedAttack = {
               id: alertId,
               date: dateStr,
-              type: alert.attack_type || 'UNKNOWN',
-              attack: alert.attack_type || 'UNKNOWN',
-              attack_type: alert.attack_type || 'UNKNOWN',
-              ip: alert.src_ip || 'Unknown',
-              src_ip: alert.src_ip || 'Unknown',
+              type: alert.attack_type || 'Missing',
+              attack: alert.attack_type || 'Missing',
+              attack_type: alert.attack_type || 'Missing',
+              ip: alert.src_ip || 'Missing',
+              src_ip: alert.src_ip || 'Missing',
               port: alert.dest_port || 0,
               proto: alert.protocol || 'TCP',
-              loc: geo.loc,
-              city: geo.loc.split(',')[0] || 'Unknown',
-              country: geo.loc.split(',')[1]?.trim() || 'UN',
+              loc: alert.location || 'MISSING',
+              city: (alert.location || 'MISSING').split(',')[0] || 'MISSING',
+              country: (alert.location || 'MISSING').split(',')[1]?.trim() || 'MISSING',
               threat: severityStr,
               severity: severityStr,
-              coords: { lat: geo.lat, lng: geo.lng },
+              coords: { lat: alert.latitude || 0, lng: alert.longitude || 0 },
               status: 'DETECTED',
               packetSize: '1500 MTU',
-              isp: 'Unknown',
+              isp: 'Missing',
               reputation: 'MALICIOUS',
               livePayload: 'Backend Log',
               detail: JSON.stringify(alert.details || {}),
@@ -545,27 +539,36 @@ function App() {
         if (!res.ok) return;
         const data = await res.json();
         if (data.status === 'success' && Array.isArray(data.attack_contexts)) {
+          let hasActive = false;
           data.attack_contexts.forEach(ctx => {
-            // Map attack_context to the internal attack card format
             const mapped = mapAttackContextToCard(ctx);
             if (ctx.attack_status === 'ended') {
-              // Remove from active attacks, add to history
               setActiveAttacks(prev => prev.filter(a => a.attack_context_id !== ctx.attack_id));
               addToHistory({ ...mapped, status: 'MITIGATED' });
-            } else if (ctx.attack_status === 'new' || ctx.attack_status === 'ongoing') {
+            } else if (ctx.attack_status === 'new' || ctx.attack_status === 'ongoing' || ctx.attack_status === 'renewed') {
+              hasActive = true;
               setActiveAttacks(prev => {
                 const exists = prev.find(a => a.attack_context_id === ctx.attack_id);
                 if (exists) {
-                  // Update in-place
                   return prev.map(a => a.attack_context_id === ctx.attack_id ? { ...a, ...mapped } : a);
                 }
-                // New attack — add it
                 return [mapped, ...prev];
               });
-              // Add to history too
               addToHistory(mapped);
             }
           });
+
+          if (hasActive) {
+            setIsAttacked(true);
+          } else {
+            setActiveAttacks(prev => {
+              const active = prev.filter(a => data.attack_contexts.some(c => c.attack_id === a.attack_context_id && c.attack_status !== 'ended'));
+              if (active.length === 0 && !activeTestAttack) {
+                setIsAttacked(false);
+              }
+              return active;
+            });
+          }
         }
       } catch (e) {
         console.warn('[attack-context] fetch error:', e);
@@ -575,7 +578,7 @@ function App() {
     fetchAttackContext(); // immediate
     const interval = setInterval(fetchAttackContext, 5000);
     return () => clearInterval(interval);
-  }, [addToHistory]);
+  }, [addToHistory, activeTestAttack]);
 
   useEffect(() => {
     let liveInterval;
@@ -1063,10 +1066,9 @@ function App() {
     finalizeAttackAndSave();
   };
 
-  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥ØºÙ„Ø§Ù‚ Ø§Ù„Ù€ overlay ÙÙ‚Ø· Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø©
+  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥ØºÙ„Ø§Ù‚ Ø§Ù„Ù€ overlay Ù Ù‚Ø· Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø©
   const hideOverlay = () => {
-    setShowOverlay(false);
-    setActiveModule(prev => prev === 'post_incident' ? null : prev);
+    setActiveModule(prev => prev === 'analysis' ? null : prev);
   };
 
   const handleNodeClick = (node, event) => {
@@ -1074,8 +1076,8 @@ function App() {
       if (node.isAttacker || node.threat) {
         const attackData = node.ip ? node : (activeTestAttack || {});
         const locParts = (attackData.loc || "").split(', ');
-        const derivedCity = locParts[0] || "Unknown";
-        const derivedCountry = locParts[1] || "UN";
+        const derivedCity = locParts[0] || "MISSING";
+        const derivedCountry = locParts[1] || "MISSING";
 
         const attackerNode = {
           ...attackData,
@@ -1194,9 +1196,10 @@ function App() {
           <div style={{
             marginLeft: activeModule ? '0px' : '80px',
             width: activeModule ? '100%' : 'calc(100% - 80px)',
-            pointerEvents: (showOverlay || activeModule === 'post_incident') ? 'all' : 'none',
-            position: 'fixed', top: 0, zIndex: 20000, height: '100%',
-            visibility: (showOverlay || activeModule === 'post_incident') ? 'visible' : 'hidden'
+            pointerEvents: showOverlay ? 'all' : 'none',
+            opacity: showOverlay ? 1 : 0,
+            visibility: showOverlay ? 'visible' : 'hidden',
+            position: 'fixed', top: 0, zIndex: 20000, height: '100%'
           }}>
             <AttackOverlay
               isAttacked={isAttacked}

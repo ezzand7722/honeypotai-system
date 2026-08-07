@@ -9,6 +9,7 @@ const SEVERITY_CONFIG = {
   Medium:  { label: 'MEDIUM',  color: '#ffd60a', bg: 'rgba(255,214,10,0.08)', pulse: false },
   Mild:    { label: 'MILD',    color: '#30d158', bg: 'rgba(48,209,88,0.08)',  pulse: false },
   Low:     { label: 'LOW',     color: '#636366', bg: 'rgba(99,99,102,0.06)', pulse: false },
+  Missing: { label: 'MISSING', color: '#636366', bg: 'rgba(99,99,102,0.06)', pulse: false },
 };
 
 const STATUS_CONFIG = {
@@ -18,7 +19,7 @@ const STATUS_CONFIG = {
 };
 
 export default function AttackContextCard({ ctx, style }) {
-  const sev = SEVERITY_CONFIG[ctx.severity] || SEVERITY_CONFIG.Low;
+  const sev = SEVERITY_CONFIG[ctx.severity] || SEVERITY_CONFIG.Missing;
   const statusCfg = STATUS_CONFIG[ctx.attack_status] || STATUS_CONFIG.new;
 
   return (

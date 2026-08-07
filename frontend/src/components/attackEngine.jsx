@@ -28,8 +28,8 @@ export const createTestAttack = () => {
   
   // تشريح نص الموقع (مثلاً "Moscow, RU" إلى مدينة ودولة)
   const geoParts = randomGeo.loc.split(', ');
-  const city = geoParts[0] || "Unknown";
-  const country = geoParts[1] || "UN";
+  const city = geoParts[0] || "MISSING";
+  const country = geoParts[1] || "MISSING";
 
   const attackId = 'EV-' + Math.floor(Math.random() * 90000 + 10000);
   const sharedIp = generateRandomIP(); // single IP used for both src_ip and ip
@@ -53,7 +53,7 @@ export const createTestAttack = () => {
     coords: { lat: randomGeo.lat, lng: randomGeo.lng },
     status: 'DETECTED & LOGGED',
     packetSize: '1500 MTU',
-    isp: 'Unknown',
+    isp: 'MISSING',
     reputation: 'MALICIOUS',
     livePayload: '124.5 MB/s',
     // إضافة الحقول الجديدة
@@ -83,8 +83,8 @@ export const createLoopbackAttack = (typeKey) => {
     type: selected.type,
     attack: selected.type,
     attack_type: selected.type,
-    src_ip: "127.0.0.1",
-    ip: "127.0.0.1",
+    src_ip: "MISSING",
+    ip: "MISSING",
     port: selected.port,
     proto: "TCP/UDP",
     loc: "Amman, JO", // تحديد الموقع للأردن

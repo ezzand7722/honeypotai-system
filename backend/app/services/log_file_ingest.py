@@ -65,8 +65,8 @@ def _safe_timestamp(value: Any) -> datetime:
 
 
 def _map_to_raw_record(raw: dict[str, Any], source_file: str, source_line: int) -> RawHoneypotRecord:
-    src_ip = raw.get("src_ip") or raw.get("source_ip") or "127.0.0.1"
-    dst_ip = raw.get("dst_ip") or raw.get("destination_ip") or "127.0.0.1"
+    src_ip = raw.get("src_ip") or raw.get("source_ip")
+    dst_ip = raw.get("dst_ip") or raw.get("destination_ip")
     dst_port = raw.get("dst_port") or raw.get("destination_port") or 0
 
     attack_id = str(
@@ -76,7 +76,8 @@ def _map_to_raw_record(raw: dict[str, Any], source_file: str, source_line: int) 
         or f"line-{source_line}"
     )
 
-    attack_vector = str(raw.get("eventid") or raw.get("attack_vector") or raw.get("protocol") or "unknown")
+    attack_vector = str(raw.get("eventid") or raw.get("attack_vector") or raw.get("protocol") or "")
+    attack_vector = attack_vector if attack_vector else None
     payload = raw.get("payload") or raw.get("message") or raw.get("input")
 
     metadata = dict(raw)

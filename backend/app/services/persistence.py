@@ -1,6 +1,7 @@
 import json
 import logging
 import sqlite3
+import uuid
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
@@ -39,7 +40,16 @@ def _use_postgres() -> bool:
 
 def _connect_postgres() -> psycopg.Connection:
     settings = get_settings()
-    return psycopg.connect(settings.database_url)
+    conn = psycopg.connect(settings.database_url)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET statement_timeout = 30000;")
+            cur.execute("SET idle_in_transaction_session_timeout = 30000;")
+        conn.commit()
+    except Exception as e:
+        log.warning(f"Failed to set session timeouts: {e}")
+        conn.rollback()
+    return conn
 
 
 def _utc_now() -> str:
@@ -106,8 +116,8 @@ def initialize_database() -> None:
                         attack_id      VARCHAR(36)  PRIMARY KEY,
                         src_ip         VARCHAR(45)  NOT NULL,
                         attack_type    VARCHAR(50)  NOT NULL,
-                        attack_status  VARCHAR(20)  NOT NULL DEFAULT 'new',
-                        severity       VARCHAR(20)  NOT NULL DEFAULT 'Low',
+                        attack_status  VARCHAR(20)  NULL,
+                        severity       VARCHAR(20)  NULL,
                         connection_count  INT  NOT NULL DEFAULT 0,
                         failed_count      INT  NOT NULL DEFAULT 0,
                         success_count     INT  NOT NULL DEFAULT 0,
@@ -116,7 +126,11 @@ def initialize_database() -> None:
                         suspicious_cmds   INT  NOT NULL DEFAULT 0,
                         start_time        TIMESTAMP NOT NULL DEFAULT NOW(),
                         last_seen_time    TIMESTAMP NOT NULL DEFAULT NOW(),
-                        ended_time        TIMESTAMP NULL
+                        ended_time        TIMESTAMP NULL,
+                        renewed_count     INT NOT NULL DEFAULT 0,
+                        location          VARCHAR(255) NULL,
+                        latitude          DOUBLE PRECISION NULL,
+                        longitude         DOUBLE PRECISION NULL
                     )
                 """)
                 cur.execute("""
@@ -180,9 +194,9 @@ def initialize_database() -> None:
                 CREATE TABLE IF NOT EXISTS attack_context (
                     attack_id      TEXT PRIMARY KEY,
                     src_ip         TEXT NOT NULL,
-                    attack_type    TEXT NOT NULL,
+                    attack_type    TEXT,
                     attack_status  TEXT NOT NULL DEFAULT 'new',
-                    severity       TEXT NOT NULL DEFAULT 'Low',
+                    severity       TEXT DEFAULT 'Low',
                     connection_count  INTEGER NOT NULL DEFAULT 0,
                     failed_count      INTEGER NOT NULL DEFAULT 0,
                     success_count     INTEGER NOT NULL DEFAULT 0,
@@ -191,7 +205,11 @@ def initialize_database() -> None:
                     suspicious_cmds   INTEGER NOT NULL DEFAULT 0,
                     start_time        TEXT NOT NULL,
                     last_seen_time    TEXT NOT NULL,
-                    ended_time        TEXT NULL
+                    ended_time        TEXT NULL,
+                    renewed_count     INTEGER NOT NULL DEFAULT 0,
+                    location          TEXT NULL,
+                    latitude          REAL NULL,
+                    longitude         REAL NULL
                 )
             """)
             conn.commit()
@@ -214,9 +232,9 @@ def upsert_attack_context(ai_output: dict) -> None:
         return
 
     src_ip = ai_output.get("src_ip", "")
-    attack_type = ai_output.get("attack_type", "Unknown")
+    attack_type = ai_output.get("attack_type")
     attack_status = ai_output.get("attack_status", "new")
-    severity = ai_output.get("severity", "Low")
+    severity = ai_output.get("severity")
     connection_count = int(ai_output.get("connection_count", 0))
     failed_count = int(ai_output.get("failed_count", 0))
     success_count = int(ai_output.get("success_count", 0))
@@ -237,15 +255,24 @@ def upsert_attack_context(ai_output: dict) -> None:
                         unique_passwords, command_count, suspicious_cmds,
                         start_time, last_seen_time, ended_time
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s)
-                    ON CONFLICT (attack_id) DO UPDATE SET
-                        attack_status     = EXCLUDED.attack_status,
+                    ON CONFLICT (src_ip, attack_type) DO UPDATE SET
+                        attack_status     = CASE 
+                                                WHEN EXCLUDED.attack_status = 'ended' THEN 'ended'
+                                                WHEN attack_context.attack_status = 'ended' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN 'renewed'
+                                                WHEN attack_context.attack_status = 'renewed' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN 'renewed'
+                                                ELSE EXCLUDED.attack_status
+                                            END,
                         severity          = EXCLUDED.severity,
-                        connection_count  = EXCLUDED.connection_count,
-                        failed_count      = EXCLUDED.failed_count,
-                        success_count     = EXCLUDED.success_count,
-                        unique_passwords  = EXCLUDED.unique_passwords,
-                        command_count     = EXCLUDED.command_count,
-                        suspicious_cmds   = EXCLUDED.suspicious_cmds,
+                        connection_count  = GREATEST(attack_context.connection_count, EXCLUDED.connection_count),
+                        failed_count      = GREATEST(attack_context.failed_count, EXCLUDED.failed_count),
+                        success_count     = GREATEST(attack_context.success_count, EXCLUDED.success_count),
+                        unique_passwords  = GREATEST(attack_context.unique_passwords, EXCLUDED.unique_passwords),
+                        command_count     = GREATEST(attack_context.command_count, EXCLUDED.command_count),
+                        suspicious_cmds   = GREATEST(attack_context.suspicious_cmds, EXCLUDED.suspicious_cmds),
+                        renewed_count     = CASE 
+                                                WHEN attack_context.attack_status = 'ended' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN attack_context.renewed_count + 1
+                                                ELSE attack_context.renewed_count
+                                            END,
                         last_seen_time    = NOW(),
                         ended_time        = EXCLUDED.ended_time
                 """, (
@@ -354,6 +381,10 @@ def persist_ingested_event(
     pipeline_id: Optional[str] = None,
     chunk_index: Optional[int] = None,
 ) -> None:
+    # We no longer assign attack_id at ingestion time to avoid creating garbage placeholder rows in attack_context.
+    # The session is only assigned and linked after the AI has classified the real attack type.
+    event.attack_id = None
+        
     event_json = event.model_dump(mode="json")
     normalized_payload = normalized_log or event_json
 
@@ -364,10 +395,11 @@ def persist_ingested_event(
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO public.attack_events (
-                        event_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
+                        event_id, attack_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
                         attack_vector, severity, risk_score, first_seen, status, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(event_id) DO UPDATE SET
+                        attack_id=EXCLUDED.attack_id,
                         pipeline_id=EXCLUDED.pipeline_id,
                         chunk_index=EXCLUDED.chunk_index,
                         source_ip=EXCLUDED.source_ip,
@@ -379,7 +411,7 @@ def persist_ingested_event(
                         first_seen=EXCLUDED.first_seen,
                         updated_at=EXCLUDED.updated_at
                 """, (
-                    event.event_id, pipeline_id, chunk_index,
+                    event.event_id, event.attack_id, pipeline_id, chunk_index,
                     str(event.source_ip), str(event.destination_ip), int(event.destination_port),
                     event.attack_vector, event.severity, float(event.risk_score),
                     event.first_seen.isoformat(), "ingested", now, now,
@@ -408,10 +440,11 @@ def persist_ingested_event(
             now = _utc_now()
             conn.execute("""
                 INSERT INTO attack_events (
-                    event_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
+                    event_id, attack_id, pipeline_id, chunk_index, source_ip, destination_ip, destination_port,
                     attack_vector, severity, risk_score, first_seen, status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id) DO UPDATE SET
+                    attack_id=excluded.attack_id,
                     pipeline_id=excluded.pipeline_id,
                     chunk_index=excluded.chunk_index,
                     source_ip=excluded.source_ip,
@@ -423,7 +456,7 @@ def persist_ingested_event(
                     first_seen=excluded.first_seen,
                     updated_at=excluded.updated_at
             """, (
-                event.event_id, pipeline_id, chunk_index,
+                event.event_id, event.attack_id, pipeline_id, chunk_index,
                 str(event.source_ip), str(event.destination_ip), int(event.destination_port),
                 event.attack_vector, event.severity, float(event.risk_score),
                 event.first_seen.isoformat(), "ingested", now, now,
@@ -445,6 +478,35 @@ def persist_ingested_event(
         finally:
             conn.close()
 
+def assign_attack_session(src_ip: str, attack_type: str = None) -> str:
+    """
+    Assigns or retrieves an attack_id based on the permanent (src_ip, attack_type) DB constraint.
+    """
+    if not _use_postgres():
+        return str(uuid.uuid4())
+        
+    conn = _connect_postgres()
+    try:
+        now = _utc_now()
+        new_id = str(uuid.uuid4())
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO public.attack_context (
+                    attack_id, src_ip, attack_type, attack_status, severity,
+                    connection_count, failed_count, success_count, unique_passwords,
+                    command_count, suspicious_cmds, start_time, last_seen_time
+                ) VALUES (%s, %s, %s, 'new', NULL, 0, 0, 0, 0, 0, 0, %s, %s)
+                ON CONFLICT (src_ip, attack_type) DO UPDATE SET
+                    last_seen_time = %s,
+                    attack_status = CASE WHEN attack_context.attack_status = 'ended' THEN 'renewed' ELSE attack_context.attack_status END,
+                    renewed_count = CASE WHEN attack_context.attack_status = 'ended' THEN attack_context.renewed_count + 1 ELSE attack_context.renewed_count END
+                RETURNING attack_id
+            """, (new_id, src_ip, attack_type, now, now, now))
+            attack_id = cur.fetchone()[0]
+        conn.commit()
+        return attack_id
+    finally:
+        conn.close()
 
 def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> None:
     if _use_postgres():
@@ -508,9 +570,10 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                     SET status = 'processed',
                         severity = %s,
                         risk_score = %s,
+                        attack_id = %s,
                         updated_at = %s
                     WHERE event_id = %s
-                """, (prediction.severity, float(prediction.risk_score), now, event_id))
+                """, (prediction.severity, float(prediction.risk_score), prediction.attack_id, now, event_id))
             conn.commit()
         finally:
             conn.close()
@@ -544,9 +607,10 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                 SET status = 'processed',
                     severity = ?,
                     risk_score = ?,
+                    attack_id = ?,
                     updated_at = ?
                 WHERE event_id = ?
-            """, (prediction.severity, float(prediction.risk_score), now, event_id))
+            """, (prediction.severity, float(prediction.risk_score), prediction.attack_id, now, event_id))
             conn.commit()
         finally:
             conn.close()

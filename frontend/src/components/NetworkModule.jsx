@@ -38,7 +38,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
   const [nodes, setNodes] = useState([
     { id: 'DH-CAM-01', ip: '127.0.0.2', status: 'ONLINE', latency: '11ms', cpu: 24, uptime: '12d 4h' },
     { id: 'DH-CAM-02', ip: '127.0.0.3', status: 'ONLINE', latency: '19ms', cpu: 16, uptime: '05d 1h' },
-    { id: 'HONEY-NODE-X', ip: '127.0.0.1', status: 'ACTIVE', latency: '5ms', cpu: 89, uptime: '48d 12h' },
+    { id: 'HONEY-NODE-X', ip: 'Sensor', status: 'ACTIVE', latency: '5ms', cpu: 89, uptime: '48d 12h' },
     { id: 'GATEWAY-SEC', ip: '127.0.0.10', status: 'SECURED', latency: '2ms', cpu: 12, uptime: '150d 0h' },
   ]);
 

@@ -213,22 +213,34 @@ async def ingest_honeypot_events_from_file(
             events = [normalize_event(item) for item in raw_records]
             raw_logs = [item.model_dump(mode="json") for item in raw_records]
 
-            async def _persist_single(index, event):
-                try:
-                    await asyncio.to_thread(
-                        record_alert,
-                        event,
-                        pipeline_id,
-                        index // chunk_size_val,
-                        raw_logs[index],
-                        event.model_dump(mode="json"),
-                    )
-                except Exception as e:
-                    logger.error("RECORD_ALERT_ERROR_BG pipeline_id=%s event_id=%s error=%s", pipeline_id, event.event_id, e)
+            sem = asyncio.Semaphore(5)
 
-            # Persist all alerts in parallel to dramatically reduce Supabase network round-trip overhead
+            async def _persist_single(index, event):
+                async with sem:
+                    try:
+                        await asyncio.to_thread(
+                            record_alert,
+                            event,
+                            pipeline_id,
+                            index // chunk_size_val,
+                            raw_logs[index],
+                            event.model_dump(mode="json"),
+                        )
+                        return None
+                    except Exception as e:
+                        logger.error("RECORD_ALERT_ERROR_BG pipeline_id=%s event_id=%s error=%s", pipeline_id, event.event_id, e)
+                        return event.event_id
+
+            # Persist all alerts in parallel with limited concurrency to avoid connection exhaustion
             tasks = [_persist_single(index, event) for index, event in enumerate(events)]
-            await asyncio.gather(*tasks)
+            results = await asyncio.gather(*tasks)
+            
+            failed_ids = [eid for eid in results if eid is not None]
+            success_count = len(events) - len(failed_ids)
+            logger.info("BATCH_INGEST_SUMMARY pipeline_id=%s total=%d success=%d failed=%d", 
+                        pipeline_id, len(events), success_count, len(failed_ids))
+            if failed_ids:
+                logger.error("BATCH_INGEST_FAILED_EVENTS pipeline_id=%s failed_ids=%r", pipeline_id, failed_ids)
 
             await submit_batch_for_scoring(events, raw_logs, pipeline_id, chunk_size_val)
             logger.info("FILE_INGEST_BG_COMPLETE pipeline_id=%s", pipeline_id)

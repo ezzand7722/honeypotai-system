@@ -131,7 +131,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
         if received_at.tzinfo is not None:
             received_at = received_at.replace(tzinfo=None)
 
-        attack_type = event.attack_vector or "Unknown"
+        attack_type = event.attack_vector
         severity = event.severity or "high"
         if prediction:
             if prediction.attack_type:
@@ -183,7 +183,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 group["details"]["prediction"] = prediction.model_dump(mode="json")
                 if getattr(prediction, "severity", None):
                     group["severity"] = prediction.severity
-                elif getattr(prediction, "threat_level", None) and prediction.threat_level != "unknown":
+                elif getattr(prediction, "threat_level", None):
                     group["severity"] = prediction.threat_level
 
         if not group["details"].get("command"):
