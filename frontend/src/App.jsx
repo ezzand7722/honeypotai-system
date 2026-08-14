@@ -90,8 +90,9 @@ function mapAttackContextToCard(ctx) {
       suspicious_cmds: ctx.suspicious_cmds,
       duration_seconds: ctx.duration_seconds,
     },
-    // Mitigation commands from AI analysis
-    recommended_commands: ctx.recommended_commands || []
+    // Real attacker commands captured by the AI from the logs
+    attacker_commands: ctx.attacker_commands || [],
+    commands_used: ctx.attacker_commands || []
   };
 }
 
@@ -341,8 +342,6 @@ function App() {
                 timeline.push({ time: timeStr, event: `AI SCANNER IDENTIFIED SIGNATURE: ${alert.attack_type || 'MISSING'}`, status: 'critical' });
                 if (alert.details?.explanation) {
                     timeline.push({ time: timeStr, event: `AI ANALYSIS: ${alert.details.explanation.substring(0, 150)}...`, status: 'critical' });
-                } else if (alert.details?.command) {
-                    timeline.push({ time: timeStr, event: `MALICIOUS COMMAND EXECUTED: ${alert.details.command}`, status: 'critical' });
                 } else if (alert.details?.attack_type) {
                     timeline.push({ time: timeStr, event: `DEPLOYING HONEYPOT DECOY AGAINST: ${alert.details.attack_type}`, status: 'warning' });
                 } else {
@@ -471,7 +470,6 @@ function App() {
                           return { 
                             ...a, 
                             eventTimeline: mergedTimeline,
-                            commands_used: mergedTimeline.map(e => e.details?.command || e.details?.input).filter(Boolean),
                           };
                         }
                         return a;

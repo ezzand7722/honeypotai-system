@@ -124,6 +124,7 @@ def initialize_database() -> None:
                         unique_passwords   INT  NOT NULL DEFAULT 0,
                         command_count     INT  NOT NULL DEFAULT 0,
                         suspicious_cmds   INT  NOT NULL DEFAULT 0,
+                        commands          JSONB NULL,
                         start_time        TIMESTAMP NOT NULL DEFAULT NOW(),
                         last_seen_time    TIMESTAMP NOT NULL DEFAULT NOW(),
                         ended_time        TIMESTAMP NULL,
@@ -141,6 +142,9 @@ def initialize_database() -> None:
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_attack_context_status
                         ON public.attack_context (attack_status)
+                """)
+                cur.execute("""
+                    ALTER TABLE public.attack_context ADD COLUMN IF NOT EXISTS commands JSONB
                 """)
             conn.commit()
         finally:
@@ -204,6 +208,7 @@ def initialize_database() -> None:
                     unique_passwords   INTEGER NOT NULL DEFAULT 0,
                     command_count     INTEGER NOT NULL DEFAULT 0,
                     suspicious_cmds   INTEGER NOT NULL DEFAULT 0,
+                    commands          TEXT,
                     start_time        TEXT NOT NULL,
                     last_seen_time    TEXT NOT NULL,
                     ended_time        TEXT NULL,
@@ -214,6 +219,10 @@ def initialize_database() -> None:
                     UNIQUE(src_ip, attack_type)
                 )
             """)
+            try:
+                conn.execute("ALTER TABLE attack_context ADD COLUMN commands TEXT")
+            except Exception:
+                pass
             conn.commit()
         finally:
             conn.close()
@@ -243,6 +252,7 @@ def upsert_attack_context(ai_output: dict) -> None:
     unique_passwords = int(ai_output.get("unique_passwords", 0))
     command_count = int(ai_output.get("command_count", 0))
     suspicious_cmds = int(ai_output.get("suspicious_commands", ai_output.get("suspicious_cmds", 0)))
+    commands = ai_output.get("commands") or []
     now = _utc_now()
     ended_time = now if attack_status == "ended" else None
 
@@ -254,10 +264,10 @@ def upsert_attack_context(ai_output: dict) -> None:
                     INSERT INTO public.attack_context (
                         attack_id, src_ip, attack_type, attack_status, severity,
                         connection_count, failed_count, success_count,
-                        unique_passwords, command_count, suspicious_cmds,
+                        unique_passwords, command_count, suspicious_cmds, commands,
                         start_time, last_seen_time, ended_time,
                         location, latitude, longitude
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW(), %s, %s, %s, %s)
                     ON CONFLICT (src_ip, attack_type) DO UPDATE SET
                         attack_status     = CASE 
                                                 WHEN EXCLUDED.attack_status = 'ended' THEN 'ended'
@@ -272,6 +282,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                         unique_passwords  = GREATEST(attack_context.unique_passwords, EXCLUDED.unique_passwords),
                         command_count     = GREATEST(attack_context.command_count, EXCLUDED.command_count),
                         suspicious_cmds   = GREATEST(attack_context.suspicious_cmds, EXCLUDED.suspicious_cmds),
+                        commands          = EXCLUDED.commands,
                         renewed_count     = CASE 
                                                 WHEN attack_context.attack_status = 'ended' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN attack_context.renewed_count + 1
                                                 ELSE attack_context.renewed_count
@@ -281,7 +292,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                 """, (
                     attack_id, src_ip, attack_type, attack_status, severity,
                     connection_count, failed_count, success_count,
-                    unique_passwords, command_count, suspicious_cmds,
+                    unique_passwords, command_count, suspicious_cmds, _json(commands),
                     ended_time,
                     ai_output.get("location"),
                     ai_output.get("latitude"),
@@ -303,10 +314,10 @@ def upsert_attack_context(ai_output: dict) -> None:
                 INSERT INTO attack_context (
                     attack_id, src_ip, attack_type, attack_status, severity,
                     connection_count, failed_count, success_count,
-                    unique_passwords, command_count, suspicious_cmds,
+                    unique_passwords, command_count, suspicious_cmds, commands,
                     start_time, last_seen_time, ended_time,
                     location, latitude, longitude
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (attack_id) DO UPDATE SET
                     attack_status     = excluded.attack_status,
                     severity          = excluded.severity,
@@ -316,12 +327,13 @@ def upsert_attack_context(ai_output: dict) -> None:
                     unique_passwords  = excluded.unique_passwords,
                     command_count     = excluded.command_count,
                     suspicious_cmds   = excluded.suspicious_cmds,
+                    commands          = excluded.commands,
                     last_seen_time    = excluded.last_seen_time,
                     ended_time        = excluded.ended_time
             """, (
                 attack_id, src_ip, attack_type, attack_status, severity,
                 connection_count, failed_count, success_count,
-                unique_passwords, command_count, suspicious_cmds,
+                unique_passwords, command_count, suspicious_cmds, _json(commands),
                 now, now, ended_time,
                 ai_output.get("location"),
                 ai_output.get("latitude"),
@@ -345,7 +357,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                 cur.execute("""
                     SELECT attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
-                           unique_passwords, command_count, suspicious_cmds,
+                           unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
                            location, latitude, longitude
                     FROM public.attack_context
@@ -366,7 +378,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                 cursor = conn.execute("""
                     SELECT attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
-                           unique_passwords, command_count, suspicious_cmds,
+                           unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
                            location, latitude, longitude
                     FROM attack_context
@@ -374,7 +386,13 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                     LIMIT ?
                 """, (limit,))
                 for row in cursor.fetchall():
-                    results.append(dict(row))
+                    rec = dict(row)
+                    if isinstance(rec.get("commands"), str):
+                        try:
+                            rec["commands"] = json.loads(rec["commands"])
+                        except Exception:
+                            rec["commands"] = []
+                    results.append(rec)
             except Exception as e:
                 log.error("load_recent_attack_contexts sqlite error: %s", e)
             finally:

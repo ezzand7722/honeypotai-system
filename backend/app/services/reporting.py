@@ -116,6 +116,17 @@ def pipeline_status(pipeline_id: str) -> Optional[Dict[str, Any]]:
         return dict(pipeline)
 
 
+def _sanitize_event(event: EnrichedEvent) -> Dict[str, Any]:
+    """Return a frontend-safe event payload with pre-AI raw command/credential data stripped."""
+    ev = event.model_dump(mode="json")
+    ev.pop("payload", None)
+    md = ev.get("metadata")
+    if isinstance(md, dict):
+        for key in ("input", "command", "message", "password", "username"):
+            md.pop(key, None)
+    return ev
+
+
 def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
     """Return alerts aggregated by (src_ip, attack_type) so multiple logs
     from the same attacker doing the same attack = 1 card."""
@@ -157,7 +168,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                 "severity": severity,
                 "instance_count": 0,
                 "details": {
-                    "event": event.model_dump(mode="json"),
+                    "event": _sanitize_event(event),
                     "prediction": None,
                     "received_at": received_at.isoformat(),
                     "pipeline_id": record.get("pipeline_id"),
@@ -172,7 +183,7 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
             group["last_received_at"] = received_at
             group["details"]["received_at"] = received_at.isoformat()
             group["details"]["pipeline_id"] = record.get("pipeline_id")
-            group["details"]["event"] = event.model_dump(mode="json")
+            group["details"]["event"] = _sanitize_event(event)
 
         if prediction:
             risk_map = {"low": 1, "mild": 1, "medium": 2, "high": 3, "extreme": 4}
@@ -185,14 +196,6 @@ def recent_alerts(limit: int = 10) -> list[Dict[str, Any]]:
                     group["severity"] = prediction.severity
                 elif getattr(prediction, "threat_level", None):
                     group["severity"] = prediction.threat_level
-
-        if not group["details"].get("command"):
-            raw_md = event.metadata or {}
-            cmd = raw_md.get("input")
-            if not cmd and "command" in str(raw_md.get("eventid", "")).lower():
-                cmd = raw_md.get("message")
-            if cmd:
-                group["details"]["command"] = cmd
 
         ts = event.first_seen.timestamp()
         if ts < group["first_seen"]:

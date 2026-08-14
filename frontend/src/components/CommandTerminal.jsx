@@ -21,7 +21,7 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
   }, [visibleCount]);
 
   const handleCopyAll = () => {
-    const allCommands = commands.map(c => c.command).join('\n');
+    const allCommands = commands.map(c => (typeof c === 'string' ? c : c.command)).join('\n');
     navigator.clipboard.writeText(allCommands).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -83,7 +83,7 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
             <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#ffbd2e' }} />
             <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: '#27c93f' }} />
             <span style={{ marginLeft: '12px', color: '#888', fontSize: '12px' }}>
-              root@honeypot-ai:~# mitigation-terminal
+              root@honeypot-ai:~# attacker-terminal
             </span>
           </div>
           <button
@@ -115,7 +115,7 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
           background: 'rgba(0, 255, 65, 0.03)',
         }}>
           <div style={{ color: '#00ff41', fontSize: '11px', opacity: 0.6, marginBottom: '6px', letterSpacing: '2px' }}>
-            // RECOMMENDED_MITIGATION_COMMANDS
+            // ATTACKER_COMMANDS
           </div>
           <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
             <div>
@@ -123,7 +123,7 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
               <span style={{ color: '#ff6b35', fontWeight: 'bold', fontSize: '13px' }}>{attackType || 'Unknown'}</span>
             </div>
             <div>
-              <span style={{ color: '#666', fontSize: '11px' }}>TARGET_IP: </span>
+              <span style={{ color: '#666', fontSize: '11px' }}>ATTACKER_IP: </span>
               <span style={{ color: '#ff2d55', fontWeight: 'bold', fontSize: '13px' }}>{attackerIp || 'N/A'}</span>
             </div>
             <div>
@@ -163,9 +163,11 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
                   fontWeight: 'bold',
                   letterSpacing: '1px',
                 }}>
-                  STEP {cmd.step || idx + 1}
+                  STEP {idx + 1}
                 </span>
-                <span style={{ color: '#555', fontSize: '11px' }}>{cmd.description}</span>
+                {typeof cmd !== 'string' && cmd.description ? (
+                  <span style={{ color: '#555', fontSize: '11px' }}>{cmd.description}</span>
+                ) : null}
               </div>
               <div style={{
                 display: 'flex',
@@ -183,7 +185,7 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
                   flex: 1,
                   wordBreak: 'break-all',
                 }}>
-                  {cmd.command}
+                  {typeof cmd === 'string' ? cmd : cmd.command}
                 </code>
               </div>
             </div>
@@ -207,13 +209,13 @@ const CommandTerminal = ({ commands = [], attackType = 'Unknown', attackerIp = '
               textAlign: 'center',
               opacity: 0.7,
             }}>
-              ✓ ALL {commands.length} COMMANDS READY FOR EXECUTION
+              ✓ ALL {commands.length} COMMANDS CAPTURED
             </div>
           )}
 
           {commands.length === 0 && (
             <div style={{ color: '#666', fontSize: '13px', padding: '20px 0', textAlign: 'center' }}>
-              No mitigation commands available for this attack type.
+              No commands captured for this attack.
             </div>
           )}
         </div>

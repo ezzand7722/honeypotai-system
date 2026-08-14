@@ -54,7 +54,7 @@ try:
                 if attack_type:
                     cur.execute('''
                         SELECT attack_id, connection_count, success_count, failed_count, 
-                               unique_passwords, command_count, suspicious_cmds, start_time, attack_type
+                               unique_passwords, command_count, suspicious_cmds, start_time, attack_type, commands
                         FROM public.attack_context
                         WHERE src_ip = %s AND attack_type = %s
                         ORDER BY last_seen_time DESC LIMIT 1
@@ -62,7 +62,7 @@ try:
                 else:
                     cur.execute('''
                         SELECT attack_id, connection_count, success_count, failed_count, 
-                               unique_passwords, command_count, suspicious_cmds, start_time, attack_type
+                               unique_passwords, command_count, suspicious_cmds, start_time, attack_type, commands
                         FROM public.attack_context
                         WHERE src_ip = %s
                         ORDER BY last_seen_time DESC LIMIT 1
@@ -83,7 +83,8 @@ try:
                         "command_count": row[5],
                         "suspicious_commands": row[6],
                         "start_time": start_time_ts,
-                        "attack_type": row[8]
+                        "attack_type": row[8],
+                        "commands": row[9] or []
                     }
         except Exception as e:
             log.error("Failed to lookup active session from DB: %s", e)
@@ -279,6 +280,7 @@ def _build_prediction(event_id: str, formatted_log: dict, result: dict, pipeline
             "unique_passwords": result.get("unique_passwords", 0),
             "command_count": result.get("command_count", 0),
             "suspicious_commands": result.get("suspicious_commands", 0),
+            "commands": result.get("commands", []),
             "pipeline": result.get("pipeline", []),
             "attack_id": result.get("attack_id", ""),
             "detection_time": result.get("detection_time", ""),

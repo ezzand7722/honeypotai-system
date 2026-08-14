@@ -585,7 +585,7 @@ const AttackOverlay = ({
                     e.currentTarget.style.boxShadow = '0 0 10px rgba(0, 255, 65, 0.2)';
                   }}
                 >
-                  {"⚡ VIEW MITIGATION COMMANDS >>"}
+                  {"⚡ VIEW ATTACKER COMMANDS >>"}
                 </button>
               </div>
             </div>
@@ -722,7 +722,7 @@ const AttackOverlay = ({
       {/* Command Terminal Overlay */}
       {showCommandTerminal && attackToShow && (
         <CommandTerminal
-          commands={attackToShow.recommended_commands || []}
+          commands={attackToShow.attacker_commands || []}
           attackType={attackToShow.type || attackToShow.attack_type || 'Unknown'}
           attackerIp={attackToShow.ip || attackToShow.src_ip || 'N/A'}
           onClose={() => setShowCommandTerminal(false)}

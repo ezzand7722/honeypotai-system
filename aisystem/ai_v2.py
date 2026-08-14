@@ -13,6 +13,32 @@ SUSPICIOUS_CMDS = [
     "uname", "ls", "pwd", "mkdir", "cd", "python", "perl", "exec"
 ]
 
+
+def _command_from_row(row):
+    """Extract the actual typed command string from a raw/formatted log row."""
+    if not isinstance(row, dict):
+        return None
+    cmd = row.get("input")
+    if not isinstance(cmd, str):
+        cmd = None
+    if not cmd:
+        md = row.get("metadata")
+        if isinstance(md, dict):
+            c = md.get("input") or md.get("command")
+            cmd = c if isinstance(c, str) else None
+    if not cmd:
+        return None
+    cmd = cmd.strip()
+    return cmd if cmd and cmd.lower() != "nan" else None
+
+
+def _merge_commands(existing, new):
+    """Accumulate command strings, preserving order and keeping a sane cap."""
+    merged = list(existing or [])
+    merged.extend(new or [])
+    return merged[-500:]
+
+
 class DynamicAttackTracker:
     def __init__(self, expiry_seconds=10.0, callback_on_ended=None, db_lookup_callback=None):
         self.expiry_seconds = expiry_seconds
@@ -123,6 +149,13 @@ class DynamicAttackTracker:
                         explicit_type = valid_types[0]
                         break
 
+            # Collect the actual command strings typed by this attacker IP
+            commands_list = []
+            for _, g_row in group.iterrows():
+                cmd = _command_from_row(g_row.to_dict())
+                if cmd:
+                    commands_list.append(cmd)
+
             extracted.append({
                 "src_ip": ip,
                 "connection_count": total_conns,
@@ -131,7 +164,8 @@ class DynamicAttackTracker:
                 "unique_passwords": uniq_pwd,
                 "command_count": cmd_c,
                 "suspicious_commands": susp_c,
-                "explicit_type": explicit_type
+                "explicit_type": explicit_type,
+                "commands": commands_list
             })
 
         return pd.DataFrame(extracted)
@@ -202,6 +236,7 @@ class DynamicAttackTracker:
                 ip = row["src_ip"]
                 a_type = self.classify_attack_type(row)
                 context_key = (ip, a_type)
+                new_commands = list(row.get("commands") or [])
 
                 if context_key in self.context_table:
                     ctx = self.context_table[context_key]
@@ -213,6 +248,7 @@ class DynamicAttackTracker:
                     ctx["unique_passwords"] = max(ctx["unique_passwords"], row["unique_passwords"])
                     ctx["command_count"] += row["command_count"]
                     ctx["suspicious_commands"] += row["suspicious_commands"]
+                    ctx["commands"] = _merge_commands(ctx.get("commands"), new_commands)
 
                     duration = now - ctx["start_time"]
                     sev = self.calculate_severity(ctx, ongoing_duration=duration)
@@ -238,6 +274,7 @@ class DynamicAttackTracker:
                             "unique_passwords": max(db_ctx["unique_passwords"], int(row["unique_passwords"])),
                             "command_count": db_ctx["command_count"] + int(row["command_count"]),
                             "suspicious_commands": db_ctx["suspicious_commands"] + int(row["suspicious_commands"]),
+                            "commands": _merge_commands(db_ctx.get("commands"), new_commands),
                             "start_time": db_ctx["start_time"],
                             "last_seen": now
                         }
@@ -262,6 +299,7 @@ class DynamicAttackTracker:
                             "unique_passwords": int(row["unique_passwords"]),
                             "command_count": int(row["command_count"]),
                             "suspicious_commands": int(row["suspicious_commands"]),
+                            "commands": list(new_commands),
                             "start_time": now,
                             "last_seen": now
                         }
@@ -280,6 +318,7 @@ class DynamicAttackTracker:
                     "unique_passwords": ctx["unique_passwords"],
                     "command_count": ctx["command_count"],
                     "suspicious_commands": ctx["suspicious_commands"],
+                    "commands": ctx.get("commands", []),
                     "duration_seconds": round(now - ctx["start_time"], 2)
                 }
                 output_records.append(out_payload)
