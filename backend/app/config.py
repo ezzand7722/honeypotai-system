@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ai_chunk_pause_ms: int = 0
     database_url: Optional[str] = None
     database_path: str = "data/honeypot_events.db"
+    db_reset_interval_hours: float = 0
     geoip_db_path: str = "data/GeoLite2-City.mmdb"
 
     model_config = SettingsConfigDict(

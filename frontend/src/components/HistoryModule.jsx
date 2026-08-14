@@ -160,7 +160,7 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'rgba(0,255,65,0.6)', fontSize: '13px', fontWeight: '600' }}>&gt; TIMESTAMP: {item.date}</span> 
-                  <span style={{ fontWeight: '900', color: parseFloat(item.threat) > 85 ? '#ff0000' : '#00ff41', fontSize: '14px' }}>
+                  <span style={{ fontWeight: '900', color: (item.severityScore || parseFloat(item.threat) || 0) > 85 ? '#ff0000' : '#00ff41', fontSize: '14px' }}>
                     {item.type}
                   </span> 
                 </div>
@@ -172,7 +172,7 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                   <span style={{ border: '1px solid #00ff41', padding: '4px 10px', fontSize: '12px', fontWeight: '600', color: '#00ff41' }}>{item.status}</span>
                 </div>
                 <div style={{ height: '6px', width: '100%', background: '#081a08', marginTop: '14px', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${item.threat}%`, background: parseFloat(item.threat) > 85 ? '#ff0000' : '#ffaa00', boxShadow: parseFloat(item.threat) > 85 ? '0 0 10px #ff0000' : 'none' }}></div>
+                    <div style={{ height: '100%', width: `${(item.severityScore || parseFloat(item.threat) || 0)}%`, background: (item.severityScore || parseFloat(item.threat) || 0) > 85 ? '#ff0000' : '#ffaa00', boxShadow: (item.severityScore || parseFloat(item.threat) || 0) > 85 ? '0 0 10px #ff0000' : 'none' }}></div>
                 </div>
               </div>
             ))}

@@ -139,10 +139,10 @@ const LiveThreatsModule = ({
                 }}>
                   <div>
                     <div style={{ color: '#fff', fontSize: '20px', fontWeight: '900', marginBottom: '5px' }}>
-                      SOURCE_IP: {displayAttack?.ip}
+                      SOURCE_IP: {displayAttack?.ip || 'MISSING'}
                     </div>
                     <div style={{ fontSize: '13px', opacity: 0.8, color: '#ff4d4d' }}>
-                      LOCATION: {displayAttack?.loc || "HIDDEN_PROXY"} | THREAT_LEVEL: {displayAttack?.threat || displayAttack?.severity || "CRITICAL"}
+                      LOCATION: {displayAttack?.loc || 'MISSING'} | THREAT_LEVEL: {displayAttack?.severity || 'MISSING'}
                     </div>
                   </div>
                   <div className="blink-red" style={{ textAlign: 'right' }}>
@@ -151,30 +151,7 @@ const LiveThreatsModule = ({
                   </div>
                 </div>
 
-                {/* قسم الـ Visualizer */}
-                <div style={{ background: 'rgba(255, 0, 0, 0.03)', padding: '30px', border: '1px solid rgba(255, 0, 0, 0.1)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', fontSize: '20px', fontWeight: '900' }}>
-                        <label>PAYLOAD_INTENSITY</label>
-                        <span style={{ color: '#fff' }}>{displayAttack?.livePayload || "0.0 MB/s"}</span>
-                    </div>
 
-                    <div className="visualizer-container">
-                      {[...Array(40)].map((_, i) => (
-                        <div 
-                          key={i} 
-                          className="vis-bar"
-                          style={{ 
-                            height: `${20 + Math.random() * 80}%`,
-                            animationDelay: `${i * 0.05}s`
-                          }} 
-                        />
-                      ))}
-                    </div>
-                    <div style={{ fontSize: '10px', marginTop: '10px', opacity: 0.5, display: 'flex', justifyContent: 'space-between' }}>
-                        <span>// BIT_STREAM_ANALYSIS</span>
-                        <span>{new Date().toLocaleTimeString()}</span>
-                    </div>
-                </div>
 
                 {/* زر وصول سريع إضافي */}
                 <button 

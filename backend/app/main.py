@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import traceback
@@ -8,13 +9,26 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.routers import ai_inference, attack_context, honeypot, reporting, system
-from app.services.persistence import initialize_database
+from app.services.persistence import initialize_database, truncate_all_tables
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 logger = logging.getLogger("honeypot.api")
 
 settings = get_settings()
+
+
+async def _db_reset_loop(interval_hours: float) -> None:
+    while True:
+        await asyncio.sleep(interval_hours * 3600)
+        logger.info("DB_RESET: Truncating all database tables (interval=%.1fh)", interval_hours)
+        try:
+            truncate_all_tables()
+            from app.services.reporting import _store
+            _store.clear()
+            logger.info("DB_RESET: Database and in-memory store cleared successfully")
+        except Exception as e:
+            logger.error("DB_RESET: Failed to truncate tables: %s", e)
 
 
 def create_app() -> FastAPI:
@@ -33,6 +47,12 @@ def create_app() -> FastAPI:
     except Exception as e:
         logger.error(f"Failed to run database session sweep on start: {e}")
 
+    @app.on_event("startup")
+    async def on_startup():
+        if settings.db_reset_interval_hours > 0:
+            asyncio.create_task(_db_reset_loop(settings.db_reset_interval_hours))
+            logger.info("DB_RESET: Auto-reset scheduled every %.1f hour(s)", settings.db_reset_interval_hours)
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
         start = time.time()
@@ -47,27 +67,9 @@ def create_app() -> FastAPI:
         )
         return response
 
-    @app.exception_handler(Exception)
-    async def global_exception_handler(request: Request, exc: Exception):
-        """Catch all unhandled exceptions and return with details."""
-        error_msg = str(exc)
-        stack_trace = traceback.format_exc()
-        logger.error(f"UNHANDLED_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
-        
-        return JSONResponse(
-            status_code=500,
-            content={
-                "detail": error_msg,
-                "error_type": type(exc).__name__,
-                "path": str(request.url.path),
-            }
-        )
-
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
-        """Handle HTTPException to return JSON with details."""
         logger.info(f"HTTP_EXCEPTION path={request.url.path} status={exc.status_code} detail={exc.detail}")
-        
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -79,10 +81,8 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(ValidationError)
     async def validation_error_handler(request: Request, exc: ValidationError):
-        """Handle validation errors and return JSON."""
         errors = exc.errors()
         logger.error(f"VALIDATION_ERROR path={request.url.path} errors={errors}")
-        
         return JSONResponse(
             status_code=422,
             content={
@@ -95,11 +95,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
-        """Catch all unhandled exceptions and return with details."""
         error_msg = str(exc)
         stack_trace = traceback.format_exc()
         logger.error(f"UNHANDLED_EXCEPTION path={request.url.path} error={error_msg}\n{stack_trace}")
-        
         return JSONResponse(
             status_code=500,
             content={

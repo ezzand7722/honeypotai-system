@@ -142,11 +142,15 @@ class DynamicAttackTracker:
         success = row["success_count"]
         cmds = row["command_count"]
         explicit = row.get("explicit_type")
+        unique_passwords = row.get("unique_passwords", 0)
 
         if conn >= 8 and failed == 0 and success == 0 and cmds == 0:
             return "DDoS"
         if conn > cmds and failed == 0 and success == 0:
             return "DDoS"
+        
+        if failed > 0 or unique_passwords > 0:
+            return "Brute Force"
         
         if explicit and not explicit.lower().startswith("cowrie."):
             return explicit

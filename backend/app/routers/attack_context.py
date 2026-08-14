@@ -29,6 +29,76 @@ _ws_clients: List[WebSocket] = []
 _ws_lock = asyncio.Lock()
 
 
+def generate_mitigation_commands(attack_type: str, src_ip: str) -> list:
+    """Generate recommended mitigation commands based on attack type and attacker IP."""
+    if not src_ip:
+        src_ip = "<ATTACKER_IP>"
+
+    attack_type_lower = (attack_type or "").lower()
+
+    # Common commands for all attack types
+    common_commands = [
+        {"step": 1, "command": f"iptables -A INPUT -s {src_ip} -j DROP", "description": "Block attacker IP at firewall level"},
+        {"step": 2, "command": f"iptables -A OUTPUT -d {src_ip} -j DROP", "description": "Block outbound traffic to attacker IP"},
+    ]
+
+    if "brute" in attack_type_lower or "force" in attack_type_lower:
+        return [
+            *common_commands,
+            {"step": 3, "command": f"fail2ban-client set sshd banip {src_ip}", "description": "Add IP to fail2ban SSH jail"},
+            {"step": 4, "command": "sed -i 's/^#MaxRetries.*/MaxRetries 3/' /etc/ssh/sshd_config", "description": "Limit SSH max retries to 3"},
+            {"step": 5, "command": "sed -i 's/^#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config", "description": "Disable root login via SSH"},
+            {"step": 6, "command": "systemctl restart sshd", "description": "Restart SSH daemon with new config"},
+            {"step": 7, "command": f"grep -c '{src_ip}' /var/log/auth.log", "description": "Count failed auth attempts from attacker"},
+            {"step": 8, "command": f"lastb | grep '{src_ip}' | head -20", "description": "Show recent failed login attempts"},
+        ]
+    elif "ddos" in attack_type_lower or "flood" in attack_type_lower or "dos" in attack_type_lower:
+        return [
+            *common_commands,
+            {"step": 3, "command": f"iptables -A INPUT -s {src_ip} -m limit --limit 1/s --limit-burst 3 -j ACCEPT", "description": "Rate limit connections from attacker IP"},
+            {"step": 4, "command": "sysctl -w net.ipv4.tcp_syncookies=1", "description": "Enable SYN cookies protection"},
+            {"step": 5, "command": "sysctl -w net.ipv4.tcp_max_syn_backlog=2048", "description": "Increase SYN backlog queue"},
+            {"step": 6, "command": f"conntrack -D -s {src_ip}", "description": "Delete all connection tracking entries for attacker"},
+            {"step": 7, "command": f"ss -tn state established '( dst {src_ip} )'  | wc -l", "description": "Count active connections from attacker"},
+            {"step": 8, "command": "iptables -A INPUT -p tcp --syn -m limit --limit 1/s -j ACCEPT", "description": "Global SYN rate limiting"},
+        ]
+    elif "injection" in attack_type_lower or "sql" in attack_type_lower:
+        return [
+            *common_commands,
+            {"step": 3, "command": f"modsecurity-cli block {src_ip}", "description": "Block IP via ModSecurity WAF"},
+            {"step": 4, "command": "grep -r 'UNION\\|SELECT\\|DROP' /var/log/apache2/access.log | tail -20", "description": "Search for SQL injection patterns in logs"},
+            {"step": 5, "command": "systemctl restart apache2", "description": "Restart web server with updated WAF rules"},
+            {"step": 6, "command": f"iptables -A INPUT -s {src_ip} -p tcp --dport 80 -j DROP", "description": "Block HTTP access from attacker"},
+            {"step": 7, "command": f"iptables -A INPUT -s {src_ip} -p tcp --dport 443 -j DROP", "description": "Block HTTPS access from attacker"},
+        ]
+    elif "malware" in attack_type_lower or "trojan" in attack_type_lower or "virus" in attack_type_lower:
+        return [
+            *common_commands,
+            {"step": 3, "command": "clamscan -r /tmp /var/tmp /home --infected --remove", "description": "Scan and remove infected files"},
+            {"step": 4, "command": f"lsof -i @{src_ip}", "description": "List open files/connections to attacker IP"},
+            {"step": 5, "command": f"tcpdump -i any host {src_ip} -w /tmp/capture_{src_ip}.pcap &", "description": "Capture traffic to/from attacker for forensics"},
+            {"step": 6, "command": "rkhunter --check --skip-keypress", "description": "Run rootkit hunter scan"},
+            {"step": 7, "command": "find / -mmin -30 -type f -not -path '/proc/*' 2>/dev/null | head -50", "description": "Find recently modified files (last 30 min)"},
+        ]
+    elif "xss" in attack_type_lower or "cross" in attack_type_lower:
+        return [
+            *common_commands,
+            {"step": 3, "command": f"iptables -A INPUT -s {src_ip} -p tcp --dport 80 -j DROP", "description": "Block HTTP access from attacker"},
+            {"step": 4, "command": "grep -r '<script' /var/log/apache2/access.log | tail -20", "description": "Search for XSS patterns in web logs"},
+            {"step": 5, "command": "a2enmod headers && systemctl restart apache2", "description": "Enable security headers module"},
+        ]
+    else:
+        # Generic / Unknown attack type
+        return [
+            *common_commands,
+            {"step": 3, "command": f"whois {src_ip} | head -30", "description": "Lookup attacker IP ownership info"},
+            {"step": 4, "command": f"tcpdump -i any host {src_ip} -c 100 -w /tmp/capture_{src_ip}.pcap &", "description": "Capture 100 packets from attacker for analysis"},
+            {"step": 5, "command": f"nmap -sV -O {src_ip}", "description": "Scan attacker system for open services"},
+            {"step": 6, "command": f"grep '{src_ip}' /var/log/syslog | tail -30", "description": "Check system logs for attacker activity"},
+            {"step": 7, "command": "netstat -tunap | grep ESTABLISHED", "description": "List all established connections"},
+        ]
+
+
 def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize AI v2 output dict into a clean, frontend-ready record.
@@ -109,6 +179,11 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
         "longitude":        raw.get("longitude"),
         # Signals
         "signal":            signal,
+        # Mitigation commands
+        "recommended_commands": generate_mitigation_commands(
+            raw.get("attack_type", ""),
+            raw.get("src_ip", "")
+        ),
     }
 
 

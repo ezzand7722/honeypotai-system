@@ -130,7 +130,8 @@ def initialize_database() -> None:
                         renewed_count     INT NOT NULL DEFAULT 0,
                         location          VARCHAR(255) NULL,
                         latitude          DOUBLE PRECISION NULL,
-                        longitude         DOUBLE PRECISION NULL
+                        longitude         DOUBLE PRECISION NULL,
+                        UNIQUE(src_ip, attack_type)
                     )
                 """)
                 cur.execute("""
@@ -209,7 +210,8 @@ def initialize_database() -> None:
                     renewed_count     INTEGER NOT NULL DEFAULT 0,
                     location          TEXT NULL,
                     latitude          REAL NULL,
-                    longitude         REAL NULL
+                    longitude         REAL NULL,
+                    UNIQUE(src_ip, attack_type)
                 )
             """)
             conn.commit()
@@ -378,6 +380,35 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
             finally:
                 conn.close()
     return results
+
+
+def truncate_all_tables() -> None:
+    tables = ["attack_events", "event_logs", "ai_results", "attack_context"]
+    if _use_postgres():
+        conn = _connect_postgres()
+        try:
+            with conn.cursor() as cur:
+                for tbl in tables:
+                    cur.execute(f"TRUNCATE TABLE public.{tbl} CASCADE")
+            conn.commit()
+            log.info("Truncated all Postgres tables: %s", tables)
+        except Exception as e:
+            log.error("Failed to truncate Postgres tables: %s", e)
+        finally:
+            conn.close()
+        return
+
+    with _lock:
+        conn = _connect()
+        try:
+            for tbl in tables:
+                conn.execute(f"DELETE FROM {tbl}")
+            conn.commit()
+            log.info("Truncated all SQLite tables: %s", tables)
+        except Exception as e:
+            log.error("Failed to truncate SQLite tables: %s", e)
+        finally:
+            conn.close()
 
 
 # ────────────────────────────────────────────────────────────

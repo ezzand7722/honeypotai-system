@@ -50,6 +50,7 @@ export const createTestAttack = () => {
     country: country, // إضافة حقل الدولة بشكل منفصل
     threat: (Math.floor(Math.random() * 20) + 80) + '%',
     severity: (Math.floor(Math.random() * 20) + 80) + '%',
+    severityScore: Math.floor(Math.random() * 20) + 80,
     coords: { lat: randomGeo.lat, lng: randomGeo.lng },
     status: 'DETECTED & LOGGED',
     packetSize: '1500 MTU',
@@ -92,6 +93,7 @@ export const createLoopbackAttack = (typeKey) => {
     country: "JO",
     threat: "99%",
     severity: "99%",
+    severityScore: 99,
     coords: { lat: 31.9454, lng: 35.9239 }, // إحداثيات عمان، الأردن
     status: 'INTERNAL_BREACH_DETECTED',
     packetSize: '65535 MTU',
