@@ -57,6 +57,7 @@ function mapAttackContextToCard(ctx) {
     uniquePasswords: ctx.unique_passwords || 0,
     commandCount: ctx.command_count || 0,
     suspiciousCmds: ctx.suspicious_cmds || 0,
+    port: ctx.destination_port || 0,
     durationSeconds: ctx.duration_seconds || 0,
     severityScore: ctx.severity_score || 50,
     threat: severityMap[ctx.severity] || (ctx.severity ? String(ctx.severity).toUpperCase() : 'MISSING'),
@@ -88,6 +89,7 @@ function mapAttackContextToCard(ctx) {
       unique_passwords: ctx.unique_passwords,
       command_count: ctx.command_count,
       suspicious_cmds: ctx.suspicious_cmds,
+      destination_port: ctx.destination_port,
       duration_seconds: ctx.duration_seconds,
     },
     // Real attacker commands captured by the AI from the logs

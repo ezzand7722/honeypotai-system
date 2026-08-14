@@ -107,6 +107,7 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
         "location":         raw.get("location"),
         "latitude":         raw.get("latitude"),
         "longitude":        raw.get("longitude"),
+        "destination_port": raw.get("destination_port"),
         # Signals
         "signal":            signal,
         # Real attacker commands captured from the logs (post-AI, keyed to this IP+type)

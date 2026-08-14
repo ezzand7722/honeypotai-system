@@ -32,6 +32,18 @@ def _command_from_row(row):
     return cmd if cmd and cmd.lower() != "nan" else None
 
 
+def _as_int(value):
+    try:
+        if value is None:
+            return None
+        f = float(value)
+        if f != f:
+            return None
+        return int(f)
+    except Exception:
+        return None
+
+
 def _merge_commands(existing, new):
     """Accumulate command strings, preserving order and keeping a sane cap."""
     merged = list(existing or [])
@@ -156,6 +168,14 @@ class DynamicAttackTracker:
                 if cmd:
                     commands_list.append(cmd)
 
+            dst_port = None
+            for col in ["dst_port", "destination_port"]:
+                if col in group.columns:
+                    vals = pd.to_numeric(group[col], errors="coerce").dropna()
+                    if not vals.empty:
+                        dst_port = _as_int(vals.iloc[0])
+                        break
+
             extracted.append({
                 "src_ip": ip,
                 "connection_count": total_conns,
@@ -165,7 +185,8 @@ class DynamicAttackTracker:
                 "command_count": cmd_c,
                 "suspicious_commands": susp_c,
                 "explicit_type": explicit_type,
-                "commands": commands_list
+                "commands": commands_list,
+                "destination_port": dst_port
             })
 
         return pd.DataFrame(extracted)
@@ -249,6 +270,8 @@ class DynamicAttackTracker:
                     ctx["command_count"] += row["command_count"]
                     ctx["suspicious_commands"] += row["suspicious_commands"]
                     ctx["commands"] = _merge_commands(ctx.get("commands"), new_commands)
+                    if not ctx.get("destination_port"):
+                        ctx["destination_port"] = _as_int(row.get("destination_port"))
 
                     duration = now - ctx["start_time"]
                     sev = self.calculate_severity(ctx, ongoing_duration=duration)
@@ -275,6 +298,7 @@ class DynamicAttackTracker:
                             "command_count": db_ctx["command_count"] + int(row["command_count"]),
                             "suspicious_commands": db_ctx["suspicious_commands"] + int(row["suspicious_commands"]),
                             "commands": _merge_commands(db_ctx.get("commands"), new_commands),
+                            "destination_port": db_ctx.get("destination_port") or _as_int(row.get("destination_port")),
                             "start_time": db_ctx["start_time"],
                             "last_seen": now
                         }
@@ -300,6 +324,7 @@ class DynamicAttackTracker:
                             "command_count": int(row["command_count"]),
                             "suspicious_commands": int(row["suspicious_commands"]),
                             "commands": list(new_commands),
+                            "destination_port": _as_int(row.get("destination_port")),
                             "start_time": now,
                             "last_seen": now
                         }
@@ -319,6 +344,7 @@ class DynamicAttackTracker:
                     "command_count": ctx["command_count"],
                     "suspicious_commands": ctx["suspicious_commands"],
                     "commands": ctx.get("commands", []),
+                    "destination_port": ctx.get("destination_port"),
                     "duration_seconds": round(now - ctx["start_time"], 2)
                 }
                 output_records.append(out_payload)
@@ -350,6 +376,7 @@ class DynamicAttackTracker:
                         "unique_passwords": ctx["unique_passwords"],
                         "command_count": ctx["command_count"],
                         "suspicious_commands": ctx["suspicious_commands"],
+                        "destination_port": ctx.get("destination_port"),
                         "signal": "STOP_SENDING_LOGS"
                     }
                     callbacks_to_fire.append(ended_payload)

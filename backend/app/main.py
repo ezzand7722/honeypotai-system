@@ -18,10 +18,10 @@ logger = logging.getLogger("honeypot.api")
 settings = get_settings()
 
 
-async def _db_reset_loop(interval_hours: float) -> None:
+async def _db_reset_loop(interval_minutes: float) -> None:
     while True:
-        await asyncio.sleep(interval_hours * 3600)
-        logger.info("DB_RESET: Truncating all database tables (interval=%.1fh)", interval_hours)
+        await asyncio.sleep(interval_minutes * 60)
+        logger.info("DB_RESET: Truncating all database tables (interval=%.1fm)", interval_minutes)
         try:
             truncate_all_tables()
             from app.services.reporting import _store
@@ -49,9 +49,9 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def on_startup():
-        if settings.db_reset_interval_hours > 0:
-            asyncio.create_task(_db_reset_loop(settings.db_reset_interval_hours))
-            logger.info("DB_RESET: Auto-reset scheduled every %.1f hour(s)", settings.db_reset_interval_hours)
+        if settings.db_reset_interval_minutes > 0:
+            asyncio.create_task(_db_reset_loop(settings.db_reset_interval_minutes))
+            logger.info("DB_RESET: Auto-reset scheduled every %.1f minute(s)", settings.db_reset_interval_minutes)
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

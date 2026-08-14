@@ -132,6 +132,7 @@ def initialize_database() -> None:
                         location          VARCHAR(255) NULL,
                         latitude          DOUBLE PRECISION NULL,
                         longitude         DOUBLE PRECISION NULL,
+                        destination_port  INT NULL,
                         UNIQUE(src_ip, attack_type)
                     )
                 """)
@@ -145,6 +146,9 @@ def initialize_database() -> None:
                 """)
                 cur.execute("""
                     ALTER TABLE public.attack_context ADD COLUMN IF NOT EXISTS commands JSONB
+                """)
+                cur.execute("""
+                    ALTER TABLE public.attack_context ADD COLUMN IF NOT EXISTS destination_port INT
                 """)
             conn.commit()
         finally:
@@ -216,11 +220,16 @@ def initialize_database() -> None:
                     location          TEXT NULL,
                     latitude          REAL NULL,
                     longitude         REAL NULL,
+                    destination_port  INTEGER NULL,
                     UNIQUE(src_ip, attack_type)
                 )
             """)
             try:
                 conn.execute("ALTER TABLE attack_context ADD COLUMN commands TEXT")
+            except Exception:
+                pass
+            try:
+                conn.execute("ALTER TABLE attack_context ADD COLUMN destination_port INTEGER")
             except Exception:
                 pass
             conn.commit()
@@ -253,6 +262,7 @@ def upsert_attack_context(ai_output: dict) -> None:
     command_count = int(ai_output.get("command_count", 0))
     suspicious_cmds = int(ai_output.get("suspicious_commands", ai_output.get("suspicious_cmds", 0)))
     commands = ai_output.get("commands") or []
+    destination_port = ai_output.get("destination_port") or ai_output.get("dst_port")
     now = _utc_now()
     ended_time = now if attack_status == "ended" else None
 
@@ -266,8 +276,8 @@ def upsert_attack_context(ai_output: dict) -> None:
                         connection_count, failed_count, success_count,
                         unique_passwords, command_count, suspicious_cmds, commands,
                         start_time, last_seen_time, ended_time,
-                        location, latitude, longitude
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW(), %s, %s, %s, %s)
+                        location, latitude, longitude, destination_port
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW(), %s, %s, %s, %s, %s)
                     ON CONFLICT (src_ip, attack_type) DO UPDATE SET
                         attack_status     = CASE 
                                                 WHEN EXCLUDED.attack_status = 'ended' THEN 'ended'
@@ -283,6 +293,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                         command_count     = GREATEST(attack_context.command_count, EXCLUDED.command_count),
                         suspicious_cmds   = GREATEST(attack_context.suspicious_cmds, EXCLUDED.suspicious_cmds),
                         commands          = EXCLUDED.commands,
+                        destination_port  = COALESCE(EXCLUDED.destination_port, attack_context.destination_port),
                         renewed_count     = CASE 
                                                 WHEN attack_context.attack_status = 'ended' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN attack_context.renewed_count + 1
                                                 ELSE attack_context.renewed_count
@@ -297,6 +308,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                     ai_output.get("location"),
                     ai_output.get("latitude"),
                     ai_output.get("longitude"),
+                    destination_port,
                 ))
             conn.commit()
             log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
@@ -316,8 +328,8 @@ def upsert_attack_context(ai_output: dict) -> None:
                     connection_count, failed_count, success_count,
                     unique_passwords, command_count, suspicious_cmds, commands,
                     start_time, last_seen_time, ended_time,
-                    location, latitude, longitude
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    location, latitude, longitude, destination_port
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (attack_id) DO UPDATE SET
                     attack_status     = excluded.attack_status,
                     severity          = excluded.severity,
@@ -328,6 +340,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                     command_count     = excluded.command_count,
                     suspicious_cmds   = excluded.suspicious_cmds,
                     commands          = excluded.commands,
+                    destination_port  = excluded.destination_port,
                     last_seen_time    = excluded.last_seen_time,
                     ended_time        = excluded.ended_time
             """, (
@@ -338,6 +351,7 @@ def upsert_attack_context(ai_output: dict) -> None:
                 ai_output.get("location"),
                 ai_output.get("latitude"),
                 ai_output.get("longitude"),
+                destination_port,
             ))
             conn.commit()
             log.info("UPSERT attack_context attack_id=%s status=%s", attack_id, attack_status)
@@ -359,7 +373,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
-                           location, latitude, longitude
+                           location, latitude, longitude, destination_port
                     FROM public.attack_context
                     ORDER BY last_seen_time DESC
                     LIMIT %s
@@ -380,7 +394,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
-                           location, latitude, longitude
+                           location, latitude, longitude, destination_port
                     FROM attack_context
                     ORDER BY last_seen_time DESC
                     LIMIT ?
