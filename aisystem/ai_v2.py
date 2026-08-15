@@ -5,13 +5,9 @@ import uuid
 import threading
 import pandas as pd
 from sklearn.ensemble import IsolationForest
-import os
-import sys
 
-SUSPICIOUS_CMDS = [
-    "wget", "curl", "chmod", "rm", "nc", "bash", "sh",
-    "uname", "ls", "pwd", "mkdir", "cd", "python", "perl", "exec"
-]
+# Word-boundary safe suspicious command markers to prevent partial matches (e.g., 'ssh' matching 'sh')
+SUSPICIOUS_PATTERN = r'\b(?:wget|curl|chmod|rm|nc|bash|sh|uname|ls|pwd|mkdir|cd|python|perl|exec)\b'
 
 
 def _command_from_row(row):
@@ -61,14 +57,16 @@ class DynamicAttackTracker:
 
     def _is_suspicious(self, text):
         text = str(text).lower()
-        return any(x in text for x in SUSPICIOUS_CMDS)
+        return bool(re.search(SUSPICIOUS_PATTERN, text))
 
     def extract_features_from_logs(self, raw_logs):
         """
         Adaptive Universal Parser:
-        Dynamically extracts metrics regardless of JSON keys or plain-text formatting.
+        Dynamically extracts metrics using eventid and real command extraction.
         """
         rows = []
+
+        # 1. Standardize raw input format (JSON lines, JSON arrays, or Syslog strings)
         if isinstance(raw_logs, str):
             for line in raw_logs.strip().split("\n"):
                 line = line.strip()
@@ -82,7 +80,10 @@ class DynamicAttackTracker:
                 else:
                     ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', line)
                     if ip_match:
-                        rows.append({"src_ip": ip_match.group(0), "raw_message": line})
+                        rows.append({
+                            "src_ip": ip_match.group(0),
+                            "raw_message": line
+                        })
         elif isinstance(raw_logs, list):
             rows = raw_logs
 
@@ -91,6 +92,7 @@ class DynamicAttackTracker:
 
         df = pd.DataFrame(rows)
 
+        # 2. Dynamic IP Resolution
         ip_candidates = ["src_ip", "ip", "client_ip", "remote_ip", "host", "remote_addr", "source_ip"]
         found_ip_col = next((c for c in ip_candidates if c in df.columns), None)
 
@@ -99,7 +101,7 @@ class DynamicAttackTracker:
         else:
             df["normalized_ip"] = df.apply(
                 lambda r: next((re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v)).group(0)
-                                for v in r.values if re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v))), None),
+                                for v in r.values if re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(v))), "127.0.0.1"),
                 axis=1
             )
 
@@ -110,56 +112,11 @@ class DynamicAttackTracker:
             if not ip or ip == "nan" or ip == "":
                 continue
 
+            # Explicit numeric field fallbacks
             explicit_conns = 0
             for col in ["connection_count", "connections", "conn_count", "requests", "total_requests"]:
                 if col in group.columns:
                     explicit_conns += pd.to_numeric(group[col], errors="coerce").fillna(0).sum()
-
-            explicit_fails = 0
-            for col in ["failed_count", "failed_attempts", "fail_count", "errors"]:
-                if col in group.columns:
-                    explicit_fails += pd.to_numeric(group[col], errors="coerce").fillna(0).sum()
-
-            explicit_succ = 0
-            for col in ["success_count", "successful_logins", "success_cnt"]:
-                if col in group.columns:
-                    explicit_succ += pd.to_numeric(group[col], errors="coerce").fillna(0).sum()
-
-            combined_rows = group.apply(lambda r: " ".join(str(v) for v in r.values), axis=1).str.lower()
-
-            pattern_conns = combined_rows.str.contains(r'connect|session|accepted|get|post|request|handshake|init', regex=True).sum()
-            pattern_fails = combined_rows.str.contains(r'fail|invalid|unauthorized|denied|401|403|reject|wrong', regex=True).sum()
-            pattern_succ = combined_rows.str.contains(r'success|accepted|authenticated|200|login.success|pass', regex=True).sum()
-
-            total_conns = int(max(explicit_conns, pattern_conns, len(group)))
-            total_fails = int(max(explicit_fails, pattern_fails))
-            total_succ = int(max(explicit_succ, pattern_succ))
-
-            cmd_c = 0
-            susp_c = 0
-            for text_val in combined_rows:
-                if self._is_suspicious(text_val):
-                    susp_c += 1
-                if any(k in text_val for k in ["command", "cmd", "input", "exec", "terminal", "shell"]):
-                    cmd_c += 1
-
-            pwd_values = set()
-            pwd_cols = [c for c in group.columns if any(k in c.lower() for k in ["pass", "pwd", "auth", "secret"])]
-            for pcol in pwd_cols:
-                valid_pwds = group[pcol].dropna().astype(str)
-                pwd_values.update([p for p in valid_pwds if p.strip() and p.lower() != "nan"])
-
-            uniq_pwd = len(pwd_values)
-            
-            # Extract explicit attack type if available
-            explicit_type = None
-            for col in ["attack_vector", "attack_type", "type"]:
-                if col in group.columns:
-                    valid_types = group[col].dropna().astype(str).tolist()
-                    valid_types = [t for t in valid_types if t.strip() and t.lower() != "nan" and t.lower() != "unknown"]
-                    if valid_types:
-                        explicit_type = valid_types[0]
-                        break
 
             # Collect the actual command strings typed by this attacker IP
             commands_list = []
@@ -168,6 +125,30 @@ class DynamicAttackTracker:
                 if cmd:
                     commands_list.append(cmd)
 
+            # Event ID based accurate counting
+            eventid = group["eventid"].astype(str).str.lower() if "eventid" in group.columns else pd.Series([], dtype=str)
+
+            total_conns = int(eventid.str.contains("session.connect", na=False).sum())
+            if total_conns == 0:
+                total_conns = int(max(explicit_conns, len(group)))
+
+            total_succ = int(eventid.str.contains("login.success", na=False).sum())
+            total_fails = int(eventid.str.contains("login.failed", na=False).sum())
+
+            # Command and suspicious counts derived from actual command strings
+            cmd_c = len(commands_list)
+            susp_c = sum(1 for c in commands_list if self._is_suspicious(str(c)))
+
+            # Dynamic password variation extraction
+            pwd_values = set()
+            pwd_cols = [c for c in group.columns if any(k in c.lower() for k in ["pass", "pwd", "auth", "secret"])]
+            for pcol in pwd_cols:
+                valid_pwds = group[pcol].dropna().astype(str)
+                pwd_values.update([p for p in valid_pwds if p.strip() and p.lower() != "nan"])
+
+            uniq_pwd = len(pwd_values)
+
+            # Destination port (for frontend card display)
             dst_port = None
             for col in ["dst_port", "destination_port"]:
                 if col in group.columns:
@@ -184,7 +165,6 @@ class DynamicAttackTracker:
                 "unique_passwords": uniq_pwd,
                 "command_count": cmd_c,
                 "suspicious_commands": susp_c,
-                "explicit_type": explicit_type,
                 "commands": commands_list,
                 "destination_port": dst_port
             })
@@ -192,25 +172,21 @@ class DynamicAttackTracker:
         return pd.DataFrame(extracted)
 
     def classify_attack_type(self, row):
-        conn = row["connection_count"]
         failed = row["failed_count"]
         success = row["success_count"]
         cmds = row["command_count"]
-        explicit = row.get("explicit_type")
+        conn = row["connection_count"]
         unique_passwords = row.get("unique_passwords", 0)
 
-        if conn >= 8 and failed == 0 and success == 0 and cmds == 0:
-            return "DDoS"
-        if conn > cmds and failed == 0 and success == 0:
-            return "DDoS"
-        
         if failed > 0 or unique_passwords > 0:
             return "Brute Force"
-        
-        if explicit and not explicit.lower().startswith("cowrie."):
-            return explicit
-            
-        return None
+        if cmds > 0:
+            return "Command Injection"
+        if success > 0:
+            return "Brute Force"
+        if conn >= 5 and success == 0 and failed == 0 and cmds == 0:
+            return "DDoS"
+        return "Unknown"
 
     def calculate_severity(self, row, ongoing_duration=0.0):
         score = 0
@@ -255,33 +231,50 @@ class DynamicAttackTracker:
         with self.lock:
             for _, row in df_features.iterrows():
                 ip = row["src_ip"]
-                a_type = self.classify_attack_type(row)
-                context_key = (ip, a_type)
                 new_commands = list(row.get("commands") or [])
+                dst_port = _as_int(row.get("destination_port"))
 
-                if context_key in self.context_table:
-                    ctx = self.context_table[context_key]
+                # Check if an existing context already exists for this IP regardless of type to prevent splitting/flipping
+                existing_ctx = None
+                existing_key = None
+                for key, ctx in self.context_table.items():
+                    if key[0] == ip and ctx["status"] == "ongoing":
+                        existing_ctx = ctx
+                        existing_key = key
+                        break
+
+                if existing_ctx:
+                    ctx = existing_ctx
                     status = "ongoing"
                     ctx["last_seen"] = now
-                    ctx["connection_count"] += row["connection_count"]
-                    ctx["success_count"] += row["success_count"]
-                    ctx["failed_count"] += row["failed_count"]
-                    ctx["unique_passwords"] = max(ctx["unique_passwords"], row["unique_passwords"])
-                    ctx["command_count"] += row["command_count"]
-                    ctx["suspicious_commands"] += row["suspicious_commands"]
+
+                    # Accumulate metrics across log batches dynamically
+                    ctx["connection_count"] += int(row["connection_count"])
+                    ctx["success_count"] += int(row["success_count"])
+                    ctx["failed_count"] += int(row["failed_count"])
+                    ctx["unique_passwords"] = max(ctx["unique_passwords"], int(row["unique_passwords"]))
+                    ctx["command_count"] += int(row["command_count"])
+                    ctx["suspicious_commands"] += int(row["suspicious_commands"])
                     ctx["commands"] = _merge_commands(ctx.get("commands"), new_commands)
-                    if not ctx.get("destination_port"):
-                        ctx["destination_port"] = _as_int(row.get("destination_port"))
+                    if not ctx.get("destination_port") and dst_port:
+                        ctx["destination_port"] = dst_port
 
                     duration = now - ctx["start_time"]
                     sev = self.calculate_severity(ctx, ongoing_duration=duration)
                     ctx["severity"] = sev
                     ctx["status"] = status
                 else:
-                    # Check if there is an active session in the database first to ensure stability across restarts
+                    # Classify only once on session creation using aggregated initial row metrics
+                    a_type = self.classify_attack_type(row)
+                    context_key = (ip, a_type)
+
+                    # Restore session state from DB across restarts if available
                     db_ctx = None
                     if self.db_lookup_callback:
-                        db_ctx = self.db_lookup_callback(ip, a_type)
+                        try:
+                            db_ctx = self.db_lookup_callback(ip, a_type)
+                        except Exception:
+                            db_ctx = None
 
                     if db_ctx:
                         status = "ongoing"
@@ -298,7 +291,7 @@ class DynamicAttackTracker:
                             "command_count": db_ctx["command_count"] + int(row["command_count"]),
                             "suspicious_commands": db_ctx["suspicious_commands"] + int(row["suspicious_commands"]),
                             "commands": _merge_commands(db_ctx.get("commands"), new_commands),
-                            "destination_port": db_ctx.get("destination_port") or _as_int(row.get("destination_port")),
+                            "destination_port": db_ctx.get("destination_port") or dst_port,
                             "start_time": db_ctx["start_time"],
                             "last_seen": now
                         }
@@ -324,7 +317,7 @@ class DynamicAttackTracker:
                             "command_count": int(row["command_count"]),
                             "suspicious_commands": int(row["suspicious_commands"]),
                             "commands": list(new_commands),
-                            "destination_port": _as_int(row.get("destination_port")),
+                            "destination_port": dst_port,
                             "start_time": now,
                             "last_seen": now
                         }
@@ -357,7 +350,6 @@ class DynamicAttackTracker:
         time.sleep(self.expiry_seconds + 0.5)
         now = time.time()
 
-        callbacks_to_fire = []
         with self.lock:
             for key, ctx in list(self.context_table.items()):
                 if ctx["status"] == "ongoing" and (now - ctx["last_seen"]) >= self.expiry_seconds:
@@ -376,76 +368,10 @@ class DynamicAttackTracker:
                         "unique_passwords": ctx["unique_passwords"],
                         "command_count": ctx["command_count"],
                         "suspicious_commands": ctx["suspicious_commands"],
+                        "commands": ctx.get("commands", []),
                         "destination_port": ctx.get("destination_port"),
                         "signal": "STOP_SENDING_LOGS"
                     }
-                    callbacks_to_fire.append(ended_payload)
 
-        if self.callback_on_ended:
-            for payload in callbacks_to_fire:
-                self.callback_on_ended(payload)
-
-
-def main():
-    """
-    Standalone entry point.
-    Reads logs from DAHUA_LOGS_FILE env var (or stdin if not set),
-    processes them with DynamicAttackTracker, and writes JSON results
-    to ATTACK_RESULTS_FILE env var (or stdout).
-    """
-    import sys
-
-    input_file = os.environ.get("DAHUA_LOGS_FILE", "")
-    output_file = os.environ.get("ATTACK_RESULTS_FILE", "")
-
-    # Read input
-    if input_file and os.path.exists(input_file):
-        with open(input_file, "r", encoding="utf-8") as f:
-            raw_content = f.read()
-    else:
-        # Try reading from the default dahua_logs_multi.json in same directory
-        default_path = os.path.join(os.path.dirname(__file__), "dahua_logs_multi.json")
-        if os.path.exists(default_path):
-            with open(default_path, "r", encoding="utf-8") as f:
-                raw_content = f.read()
-        else:
-            raw_content = sys.stdin.read()
-
-    # Parse raw content
-    try:
-        raw_logs = json.loads(raw_content)
-    except json.JSONDecodeError:
-        # Try JSONL
-        raw_logs = []
-        for line in raw_content.strip().splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    raw_logs.append(json.loads(line))
-                except Exception:
-                    continue
-
-    ended_results = []
-
-    def on_ended(payload):
-        ended_results.append(payload)
-
-    tracker = DynamicAttackTracker(expiry_seconds=10.0, callback_on_ended=on_ended)
-    results = tracker.process_incoming_logs(raw_logs)
-
-    output = json.dumps(results, indent=2)
-
-    if output_file:
-        with open(output_file, "w", encoding="utf-8") as f:
-            f.write(output)
-    else:
-        # Write to default attack_results.json in same directory
-        default_out = os.path.join(os.path.dirname(__file__), "attack_results.json")
-        with open(default_out, "w", encoding="utf-8") as f:
-            f.write(output)
-
-    print(output)
-
-
-if __name__ == "__main__":
-    main()
+                    if self.callback_on_ended:
+                        self.callback_on_ended(ended_payload)
