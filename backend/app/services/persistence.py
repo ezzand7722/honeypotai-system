@@ -518,7 +518,9 @@ def persist_ingested_event(
     # We no longer assign attack_id at ingestion time to avoid creating garbage placeholder rows in attack_context.
     # The session is only assigned and linked after the AI has classified the real attack type.
     event.attack_id = None
-        
+
+    dest_ip = str(event.destination_ip) if event.destination_ip is not None else None
+
     event_json = event.model_dump(mode="json")
     normalized_payload = normalized_log or event_json
 
@@ -546,7 +548,7 @@ def persist_ingested_event(
                         updated_at=EXCLUDED.updated_at
                 """, (
                     event.event_id, event.attack_id, pipeline_id, chunk_index,
-                    str(event.source_ip), str(event.destination_ip), int(event.destination_port),
+                    str(event.source_ip), dest_ip, int(event.destination_port),
                     event.attack_vector, event.severity, float(event.risk_score),
                     event.first_seen.isoformat(), "ingested", now, now,
                 ))
@@ -591,7 +593,7 @@ def persist_ingested_event(
                     updated_at=excluded.updated_at
             """, (
                 event.event_id, event.attack_id, pipeline_id, chunk_index,
-                str(event.source_ip), str(event.destination_ip), int(event.destination_port),
+                str(event.source_ip), dest_ip, int(event.destination_port),
                 event.attack_vector, event.severity, float(event.risk_score),
                 event.first_seen.isoformat(), "ingested", now, now,
             ))
