@@ -147,9 +147,19 @@ def _chunked(items: Sequence, size: int) -> List[Sequence]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 def _format_log_for_ai(raw_log: Dict[str, Any]) -> Dict[str, Any]:
+    raw_log = dict(raw_log)
+
+    # Flatten the nested metadata dict into top-level fields so the AI's
+    # feature extractor can see password/username/input/session/protocol/
+    # src_port/dst_port/etc. (the AI only scans top-level columns).
+    metadata = raw_log.get("metadata")
+    if isinstance(metadata, dict):
+        for k, v in metadata.items():
+            raw_log.setdefault(k, v)
+
     formatted: Dict[str, Any] = {}
 
-    formatted["eventid"] = raw_log.get("eventid") or (raw_log.get("metadata") or {}).get("eventid") or raw_log.get("attack_vector")
+    formatted["eventid"] = raw_log.get("eventid") or raw_log.get("attack_vector")
     import re
     ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', str(raw_log))
     extracted_ip = ip_match.group(0) if ip_match else None
