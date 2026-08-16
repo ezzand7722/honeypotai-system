@@ -9,11 +9,19 @@ from typing import Any, Optional
 
 import psycopg
 
+try:
+    from psycopg_pool import ConnectionPool
+except ImportError:  # pragma: no cover - optional dependency
+    ConnectionPool = None
+
 from app.config import get_settings
 from app.schemas.event import AiPrediction, EnrichedEvent
 
 _lock = Lock()
 log = logging.getLogger(__name__)
+
+_pg_pool = None
+_pg_pool_lock = Lock()
 
 
 def _db_path() -> Path:
@@ -38,9 +46,7 @@ def _use_postgres() -> bool:
     return bool(settings.database_url)
 
 
-def _connect_postgres() -> psycopg.Connection:
-    settings = get_settings()
-    conn = psycopg.connect(settings.database_url)
+def _configure_connection(conn: psycopg.Connection) -> None:
     try:
         with conn.cursor() as cur:
             cur.execute("SET statement_timeout = 30000;")
@@ -48,8 +54,63 @@ def _connect_postgres() -> psycopg.Connection:
         conn.commit()
     except Exception as e:
         log.warning(f"Failed to set session timeouts: {e}")
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+
+def _get_pool():
+    """Return a shared psycopg_pool.ConnectionPool, or None if unavailable."""
+    global _pg_pool
+    if _pg_pool is not None:
+        return _pg_pool or None
+    settings = get_settings()
+    if not settings.database_url or ConnectionPool is None:
+        _pg_pool = False
+        return None
+    with _pg_pool_lock:
+        if _pg_pool is None:
+            try:
+                _pg_pool = ConnectionPool(
+                    settings.database_url,
+                    min_size=1,
+                    max_size=10,
+                    open=True,
+                    configure=_configure_connection,
+                )
+                log.info("Postgres connection pool initialized (min=1, max=10)")
+            except Exception as e:
+                log.warning("Failed to initialize connection pool, falling back to per-call connections: %s", e)
+                _pg_pool = False
+    return _pg_pool or None
+
+
+def _connect_postgres() -> psycopg.Connection:
+    pool = _get_pool()
+    if pool is not None:
+        return pool.getconn()
+    settings = get_settings()
+    conn = psycopg.connect(settings.database_url)
+    _configure_connection(conn)
     return conn
+
+
+def _release_conn(c) -> None:
+    """Release a DB connection back to the pool (or close it)."""
+    if c is None:
+        return
+    pool = _get_pool()
+    if pool is not None:
+        try:
+            pool.putconn(c)
+            return
+        except Exception as e:
+            log.debug("Error returning connection to pool: %s", e)
+    try:
+        c.close()
+    except Exception:
+        pass
 
 
 def _utc_now() -> str:
@@ -152,7 +213,7 @@ def initialize_database() -> None:
                 """)
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     log.info("Persistence target: local SQLite at %s", _db_path())
@@ -234,7 +295,7 @@ def initialize_database() -> None:
                 pass
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
 
 
 # ────────────────────────────────────────────────────────────
@@ -286,12 +347,12 @@ def upsert_attack_context(ai_output: dict) -> None:
                                                 ELSE EXCLUDED.attack_status
                                             END,
                         severity          = EXCLUDED.severity,
-                        connection_count  = GREATEST(attack_context.connection_count, EXCLUDED.connection_count),
-                        failed_count      = GREATEST(attack_context.failed_count, EXCLUDED.failed_count),
-                        success_count     = GREATEST(attack_context.success_count, EXCLUDED.success_count),
-                        unique_passwords  = GREATEST(attack_context.unique_passwords, EXCLUDED.unique_passwords),
-                        command_count     = GREATEST(attack_context.command_count, EXCLUDED.command_count),
-                        suspicious_cmds   = GREATEST(attack_context.suspicious_cmds, EXCLUDED.suspicious_cmds),
+                        connection_count  = EXCLUDED.connection_count,
+                        failed_count      = EXCLUDED.failed_count,
+                        success_count     = EXCLUDED.success_count,
+                        unique_passwords  = EXCLUDED.unique_passwords,
+                        command_count     = EXCLUDED.command_count,
+                        suspicious_cmds   = EXCLUDED.suspicious_cmds,
                         commands          = EXCLUDED.commands,
                         destination_port  = COALESCE(EXCLUDED.destination_port, attack_context.destination_port),
                         renewed_count     = CASE 
@@ -315,7 +376,7 @@ def upsert_attack_context(ai_output: dict) -> None:
         except Exception as e:
             log.error("Failed to upsert attack_context: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     # SQLite fallback
@@ -358,7 +419,7 @@ def upsert_attack_context(ai_output: dict) -> None:
         except Exception as e:
             log.error("Failed to upsert attack_context (SQLite): %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
 
 
 def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
@@ -384,7 +445,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
         except Exception as e:
             log.error("load_recent_attack_contexts postgres error: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
     else:
         with _lock:
             conn = _connect()
@@ -410,7 +471,7 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
             except Exception as e:
                 log.error("load_recent_attack_contexts sqlite error: %s", e)
             finally:
-                conn.close()
+                _release_conn(conn)
     return results
 
 
@@ -427,7 +488,7 @@ def truncate_all_tables() -> None:
         except Exception as e:
             log.error("Failed to truncate Postgres tables: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     with _lock:
@@ -440,7 +501,7 @@ def truncate_all_tables() -> None:
         except Exception as e:
             log.error("Failed to truncate SQLite tables: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
 
 
 # ────────────────────────────────────────────────────────────
@@ -504,7 +565,7 @@ def persist_ingested_event(
                 """, (event.event_id, _json(normalized_payload), now))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     with _lock:
@@ -549,7 +610,7 @@ def persist_ingested_event(
             """, (event.event_id, _json(normalized_payload), now))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
 
 def assign_attack_session(src_ip: str, attack_type: str = None) -> str:
     """
@@ -579,7 +640,7 @@ def assign_attack_session(src_ip: str, attack_type: str = None) -> str:
         conn.commit()
         return attack_id
     finally:
-        conn.close()
+        _release_conn(conn)
 
 def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> None:
     if _use_postgres():
@@ -595,7 +656,7 @@ def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> Non
                 """, (event_id, stage, _json(payload), now))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     with _lock:
@@ -610,7 +671,7 @@ def persist_log_stage(event_id: str, stage: str, payload: dict[str, Any]) -> Non
             """, (event_id, stage, _json(payload), now))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
 
 
 def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
@@ -649,7 +710,7 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                 """, (prediction.severity, float(prediction.risk_score), prediction.attack_id, now, event_id))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
         return
 
     with _lock:
@@ -686,7 +747,7 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
             """, (prediction.severity, float(prediction.risk_score), prediction.attack_id, now, event_id))
             conn.commit()
         finally:
-            conn.close()
+            _release_conn(conn)
 
 
 def load_all_events() -> list[dict[str, Any]]:
@@ -718,7 +779,7 @@ def load_all_events() -> list[dict[str, Any]]:
         except Exception as e:
             log.error("Failed to load events from Postgres: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
     else:
         with _lock:
             conn = _connect()
@@ -744,5 +805,5 @@ def load_all_events() -> list[dict[str, Any]]:
             except Exception as e:
                 log.error("Failed to load events from SQLite: %s", e)
             finally:
-                conn.close()
+                _release_conn(conn)
     return results

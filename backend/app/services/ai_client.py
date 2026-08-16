@@ -22,6 +22,7 @@ from app.services.reporting import (
     mark_chunk_failed,
     mark_chunk_sent,
 )
+from app.services.honeypot_ingest import STATIC_LOCATION, STATIC_LATITUDE, STATIC_LONGITUDE
 
 def _update_live_context_safe(ai_output: dict) -> None:
     """Lazy import to avoid circular import with attack_context router."""
@@ -45,7 +46,7 @@ try:
     from ai_v2 import DynamicAttackTracker
     def db_lookup_session(src_ip: str, attack_type: str) -> Optional[dict]:
         """Lookup active session in postgres to restore state across restarts."""
-        from app.services.persistence import _connect_postgres, _use_postgres
+        from app.services.persistence import _connect_postgres, _use_postgres, _release_conn
         if not _use_postgres():
             return None
         conn = _connect_postgres()
@@ -57,6 +58,8 @@ try:
                                unique_passwords, command_count, suspicious_cmds, start_time, attack_type, commands, destination_port
                         FROM public.attack_context
                         WHERE src_ip = %s AND attack_type = %s
+                          AND attack_status IN ('new', 'ongoing', 'renewed')
+                          AND last_seen_time > NOW() - INTERVAL '1 hour'
                         ORDER BY last_seen_time DESC LIMIT 1
                     ''', (src_ip, attack_type))
                 else:
@@ -65,6 +68,8 @@ try:
                                unique_passwords, command_count, suspicious_cmds, start_time, attack_type, commands, destination_port
                         FROM public.attack_context
                         WHERE src_ip = %s
+                          AND attack_status IN ('new', 'ongoing', 'renewed')
+                          AND last_seen_time > NOW() - INTERVAL '1 hour'
                         ORDER BY last_seen_time DESC LIMIT 1
                     ''', (src_ip,))
                 row = cur.fetchone()
@@ -90,12 +95,12 @@ try:
         except Exception as e:
             log.error("Failed to lookup active session from DB: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
         return None
 
     def sweep_expired_sessions_db() -> None:
         """Sweeps stale active sessions in database directly (idle > 1 hour) to handle restart drift."""
-        from app.services.persistence import _connect_postgres, _use_postgres
+        from app.services.persistence import _connect_postgres, _use_postgres, _release_conn
         if not _use_postgres():
             return
         conn = _connect_postgres()
@@ -113,7 +118,7 @@ try:
         except Exception as e:
             log.error("Failed to sweep expired sessions in DB: %s", e)
         finally:
-            conn.close()
+            _release_conn(conn)
 
     def on_attack_ended(payload):
         """Callback fired by DynamicAttackTracker when an IP is idle for 1 hour."""
@@ -234,9 +239,9 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     for ip, result in results_by_ip.items():
         try:
             geo = ip_to_geo.get(ip, {})
-            result["location"] = geo.get("location")
-            result["latitude"] = geo.get("latitude")
-            result["longitude"] = geo.get("longitude")
+            result["location"] = geo.get("location") or STATIC_LOCATION
+            result["latitude"] = geo.get("latitude") if geo.get("latitude") is not None else STATIC_LATITUDE
+            result["longitude"] = geo.get("longitude") if geo.get("longitude") is not None else STATIC_LONGITUDE
             
             await asyncio.to_thread(upsert_attack_context, result)
             _update_live_context_safe(result)

@@ -375,3 +375,18 @@ class DynamicAttackTracker:
 
                     if self.callback_on_ended:
                         self.callback_on_ended(ended_payload)
+
+                    # Remove the ended context so future logs for this IP start a fresh session
+                    self.context_table.pop(key, None)
+
+    def end_session(self, attack_id: str = None, src_ip: str = None, attack_type: str = None) -> None:
+        """End (and remove) an in-memory session so subsequent logs start fresh.
+
+        Matches by attack_id when provided, otherwise by (src_ip, attack_type).
+        """
+        with self.lock:
+            for key, ctx in list(self.context_table.items()):
+                if attack_id and ctx.get("attack_id") == attack_id:
+                    self.context_table.pop(key, None)
+                elif src_ip and ctx.get("src_ip") == src_ip and (not attack_type or ctx.get("attack_type") == attack_type):
+                    self.context_table.pop(key, None)

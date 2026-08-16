@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.services.persistence import load_recent_attack_contexts, _connect_postgres
+from app.services.persistence import load_recent_attack_contexts, _connect_postgres, _release_conn
 
 router = APIRouter()
 log = logging.getLogger("honeypot.attack_context")
@@ -236,14 +236,22 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
         if attack_id in _live_contexts:
             _live_contexts[attack_id]["attack_status"] = "ended"
             _live_contexts[attack_id]["is_active"] = False
-            
+
+        # Reset the in-memory AI session so future logs for this attacker start fresh
+        try:
+            from app.services.ai_client import global_tracker
+            if global_tracker:
+                global_tracker.end_session(attack_id=attack_id)
+        except Exception as e:
+            log.warning("Failed to reset in-memory tracker session %s: %s", attack_id, e)
+
         return {"status": "success", "message": f"Attack {attack_id} ended"}
     except Exception as e:
         log.error(f"Failed to end attack {attack_id}: {e}")
         return {"status": "error", "message": str(e)}
     finally:
         if conn:
-            conn.close()
+            _release_conn(conn)
 
 # ─── WebSocket Endpoint ───────────────────────────────────────────────────────
 

@@ -2,20 +2,22 @@ import uuid
 from typing import Optional
 
 from app.schemas.event import EnrichedEvent, RawHoneypotRecord
-from app.services.geo import get_location
+
+# Static deployment location (Amman, Jordan) — all attacks are geo-pinned here.
+STATIC_LOCATION = "Amman, Jordan"
+STATIC_LATITUDE = 31.9454
+STATIC_LONGITUDE = 35.9284
 
 
 def normalize_event(raw: RawHoneypotRecord) -> EnrichedEvent:
     severity = _derive_severity(raw)
     risk_score = _risk_from_severity(severity)
-    
-    geo = get_location(str(raw.source_ip))
-    
+
     # We create a new metadata dict to avoid mutating the original
     metadata = dict(raw.metadata) if raw.metadata else {}
-    metadata["location"] = geo.get("location")
-    metadata["latitude"] = geo.get("latitude")
-    metadata["longitude"] = geo.get("longitude")
+    metadata["location"] = STATIC_LOCATION
+    metadata["latitude"] = STATIC_LATITUDE
+    metadata["longitude"] = STATIC_LONGITUDE
 
     return EnrichedEvent(
         event_id=str(uuid.uuid4()),
