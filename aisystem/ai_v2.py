@@ -184,7 +184,7 @@ class DynamicAttackTracker:
             return "Command Injection"
         if success > 0:
             return "Brute Force"
-        if conn >= 5 and success == 0 and failed == 0 and cmds == 0:
+        if conn >= 1 and success == 0 and failed == 0 and cmds == 0:
             return "DDoS"
         return "Unknown"
 

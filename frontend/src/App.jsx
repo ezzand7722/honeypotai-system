@@ -577,7 +577,7 @@ function App() {
     };
 
     fetchAttackContext(); // immediate
-    const interval = setInterval(fetchAttackContext, 5000);
+    const interval = setInterval(fetchAttackContext, 1000);
     return () => clearInterval(interval);
   }, [addToHistory, activeTestAttack]);
 
@@ -602,7 +602,7 @@ function App() {
     };
 
     fetchHistory(); // immediate
-    const interval = setInterval(fetchHistory, 5000);
+    const interval = setInterval(fetchHistory, 2000);
     return () => clearInterval(interval);
   }, []);
 

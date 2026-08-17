@@ -59,7 +59,7 @@ try:
                         FROM public.attack_context
                         WHERE src_ip = %s AND attack_type = %s
                           AND attack_status IN ('new', 'ongoing', 'renewed')
-                          AND last_seen_time > NOW() - INTERVAL '1 hour'
+                          AND last_seen_time > NOW() - INTERVAL '5 minutes'
                         ORDER BY last_seen_time DESC LIMIT 1
                     ''', (src_ip, attack_type))
                 else:
@@ -69,7 +69,7 @@ try:
                         FROM public.attack_context
                         WHERE src_ip = %s
                           AND attack_status IN ('new', 'ongoing', 'renewed')
-                          AND last_seen_time > NOW() - INTERVAL '1 hour'
+                          AND last_seen_time > NOW() - INTERVAL '5 minutes'
                         ORDER BY last_seen_time DESC LIMIT 1
                     ''', (src_ip,))
                 row = cur.fetchone()
@@ -99,7 +99,7 @@ try:
         return None
 
     def sweep_expired_sessions_db() -> None:
-        """Sweeps stale active sessions in database directly (idle > 1 hour) to handle restart drift."""
+        """Sweeps stale active sessions in database directly (idle > 5 minutes) to handle restart drift."""
         from app.services.persistence import _connect_postgres, _use_postgres, _release_conn, archive_ended_attack
         if not _use_postgres():
             return
@@ -110,7 +110,7 @@ try:
                 cur.execute("""
                     SELECT attack_id FROM public.attack_context
                     WHERE attack_status IN ('new', 'ongoing', 'renewed')
-                      AND last_seen_time < NOW() - INTERVAL '1 hour'
+                      AND last_seen_time < NOW() - INTERVAL '5 minutes'
                 """)
                 expired_ids = [r[0] for r in cur.fetchall()]
                 cur.execute("""
@@ -118,7 +118,7 @@ try:
                     SET attack_status = 'ended',
                         ended_time = NOW()
                     WHERE attack_status IN ('new', 'ongoing', 'renewed')
-                      AND last_seen_time < NOW() - INTERVAL '1 hour'
+                      AND last_seen_time < NOW() - INTERVAL '5 minutes'
                 """)
             conn.commit()
             log.info("Successfully executed DB session sweep for expired sessions.")
@@ -142,13 +142,14 @@ try:
         except Exception as e:
             log.error("Failed to process expired session payload: %s", e)
 
-    # Align the in-memory AI tracker with the DB's 1-hour (3600s) session boundary
+    # Short session boundary so a fresh attack from the same IP/type does not
+    # accumulate on top of an earlier (now idle) session.
     global_tracker = DynamicAttackTracker(
-        expiry_seconds=3600.0, 
+        expiry_seconds=60.0, 
         callback_on_ended=on_attack_ended,
         db_lookup_callback=db_lookup_session
     )
-    log.info("Successfully initialized stateful DynamicAttackTracker with 1-hour expiry and DB lookup!")
+    log.info("Successfully initialized stateful DynamicAttackTracker with 60s expiry and DB lookup!")
 except ImportError as e:
     log.error("Failed to import DynamicAttackTracker from ai_v2: %s", e)
     global_tracker = None
