@@ -366,6 +366,7 @@ function App() {
             const severityStr = severityVal ? String(severityVal).toUpperCase() : 'Missing';
 
             const prediction = alert.details?.prediction || {};
+            const predDetails = prediction.details || {};
             const mappedAttack = {
               id: alertId,
               date: dateStr,
@@ -396,12 +397,14 @@ function App() {
               duration: 60000,
               progress: 0,
               eventTimeline: timeline,
-              connection_count: prediction.connection_count ?? alert.details?.connection_count ?? 0,
-              success_count: prediction.success_count ?? alert.details?.success_count ?? 0,
-              failed_count: prediction.failed_count ?? alert.details?.failed_count ?? 0,
-              unique_passwords: prediction.unique_passwords ?? alert.details?.unique_passwords ?? 0,
-              command_count: prediction.command_count ?? alert.details?.command_count ?? 0,
-              suspicious_commands: prediction.suspicious_commands ?? alert.details?.suspicious_commands ?? 0
+              connection_count: predDetails.connection_count ?? prediction.connection_count ?? alert.details?.connection_count ?? 0,
+              success_count: predDetails.success_count ?? prediction.success_count ?? alert.details?.success_count ?? 0,
+              failed_count: predDetails.failed_count ?? prediction.failed_count ?? alert.details?.failed_count ?? 0,
+              unique_passwords: predDetails.unique_passwords ?? prediction.unique_passwords ?? alert.details?.unique_passwords ?? 0,
+              command_count: predDetails.command_count ?? prediction.command_count ?? alert.details?.command_count ?? 0,
+              suspicious_commands: predDetails.suspicious_commands ?? prediction.suspicious_commands ?? alert.details?.suspicious_commands ?? 0,
+              attacker_commands: predDetails.commands || [],
+              commands_used: predDetails.commands || []
             };
             
             // addToHistory(mappedAttack); // Disabled so basic alerts don't pollute history. Only AI contexts will appear.

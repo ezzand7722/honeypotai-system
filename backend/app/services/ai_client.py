@@ -107,6 +107,7 @@ try:
         expired_ids = []
         try:
             with conn.cursor() as cur:
+                # Standard idle-timeout sweep
                 cur.execute("""
                     SELECT attack_id FROM public.attack_context
                     WHERE attack_status IN ('new', 'ongoing', 'renewed')
@@ -120,6 +121,39 @@ try:
                     WHERE attack_status IN ('new', 'ongoing', 'renewed')
                       AND last_seen_time < NOW() - INTERVAL '5 minutes'
                 """)
+
+                # Clean up any ghost "Unknown" rows that were superseded by a
+                # real-typed session for the same IP (from the type-promotion
+                # path in ai_v2.py).
+                cur.execute("""
+                    SELECT ghost.attack_id FROM public.attack_context ghost
+                    WHERE ghost.attack_type = 'Unknown'
+                      AND ghost.attack_status IN ('new', 'ongoing', 'renewed')
+                      AND EXISTS (
+                          SELECT 1 FROM public.attack_context real
+                          WHERE real.src_ip = ghost.src_ip
+                            AND real.attack_type != 'Unknown'
+                            AND real.attack_status IN ('new', 'ongoing', 'renewed')
+                      )
+                """)
+                ghost_ids = [r[0] for r in cur.fetchall()]
+                if ghost_ids:
+                    cur.execute("""
+                        UPDATE public.attack_context
+                        SET attack_status = 'ended',
+                            ended_time    = NOW()
+                        WHERE attack_type = 'Unknown'
+                          AND attack_status IN ('new', 'ongoing', 'renewed')
+                          AND EXISTS (
+                              SELECT 1 FROM public.attack_context real
+                              WHERE real.src_ip = public.attack_context.src_ip
+                                AND real.attack_type != 'Unknown'
+                                AND real.attack_status IN ('new', 'ongoing', 'renewed')
+                          )
+                    """)
+                    expired_ids.extend(ghost_ids)
+                    log.info("Ended %d ghost Unknown sessions superseded by real-typed sessions", len(ghost_ids))
+
             conn.commit()
             log.info("Successfully executed DB session sweep for expired sessions.")
         except Exception as e:

@@ -389,6 +389,18 @@ def upsert_attack_context(ai_output: dict) -> None:
         conn = _connect_postgres()
         try:
             with conn.cursor() as cur:
+                # End any stale active sessions for the same IP that have a
+                # different attack_type.  This prevents ghost cards when the
+                # in-memory session is re-typed (e.g. "Unknown" → "Brute Force").
+                cur.execute("""
+                    UPDATE public.attack_context
+                    SET attack_status = 'ended',
+                        ended_time    = NOW()
+                    WHERE src_ip       = %s
+                      AND attack_type != %s
+                      AND attack_id   != %s
+                      AND attack_status IN ('new', 'ongoing', 'renewed')
+                """, (src_ip, attack_type, attack_id))
                 cur.execute("""
                     INSERT INTO public.attack_context (
                         attack_id, src_ip, attack_type, attack_status, severity,
