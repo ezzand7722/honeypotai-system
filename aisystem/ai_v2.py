@@ -130,7 +130,13 @@ class DynamicAttackTracker:
 
             total_conns = int(eventid.str.contains("session.connect", na=False).sum())
             if total_conns == 0:
-                total_conns = int(max(explicit_conns, len(group)))
+                if eventid.str.startswith("cowrie.", na=False).any():
+                    # Cowrie: only "session.connect" is a connection. version/size/
+                    # params/closed/login/command events are NOT new connections,
+                    # so don't inflate the count with len(group).
+                    total_conns = int(explicit_conns)
+                else:
+                    total_conns = int(max(explicit_conns, len(group)))
 
             total_succ = int(eventid.str.contains("login.success", na=False).sum())
             total_fails = int(eventid.str.contains("login.failed", na=False).sum())
@@ -184,7 +190,7 @@ class DynamicAttackTracker:
             return "Command Injection"
         if success > 0:
             return "Brute Force"
-        if conn >= 1 and success == 0 and failed == 0 and cmds == 0:
+        if conn >= 3 and success == 0 and failed == 0 and cmds == 0:
             return "DDoS"
         return "Unknown"
 
@@ -234,39 +240,59 @@ class DynamicAttackTracker:
                 new_commands = list(row.get("commands") or [])
                 dst_port = _as_int(row.get("destination_port"))
 
-                # Classify the attack type from THIS batch. It is used only when
-                # creating a brand-new session; an existing session keeps its
-                # original type (sticky) so a trailing command-only chunk of a
-                # brute-force session does not flip into "Command Injection".
                 a_type = self.classify_attack_type(row)
                 context_key = (ip, a_type)
-
-                # Session identity = (src_ip, attack_type). DDoS and Brute Force
-                # from the same IP stay separate. A chunk with only commands (or
-                # otherwise ambiguous) continues the most recently active session
-                # for this IP instead of spawning a new "Command Injection".
                 existing_ctx = self.context_table.get(context_key)
-                if existing_ctx is None and a_type in ("Command Injection", "Unknown"):
+
+                # Resolve which existing session (if any) this batch continues.
+                if existing_ctx is None:
+                    best = None
                     for ctx in self.context_table.values():
                         if ctx.get("src_ip") == ip and ctx.get("status") == "ongoing":
-                            if existing_ctx is None or ctx.get("last_seen", 0) > existing_ctx.get("last_seen", 0):
-                                existing_ctx = ctx
+                            if best is None or ctx.get("last_seen", 0) > best.get("last_seen", 0):
+                                best = ctx
+
+                    if best is not None:
+                        if a_type in ("Unknown", "Command Injection"):
+                            # Ambiguous batch: continue the most recent session.
+                            existing_ctx = best
+                        elif a_type == "DDoS":
+                            # A DDoS-labelled batch continues an existing session only
+                            # if that session already shows login/command evidence
+                            # (i.e. the handshake of a Brute Force / CI session).
+                            if (best.get("failed_count", 0) > 0
+                                    or best.get("success_count", 0) > 0
+                                    or best.get("command_count", 0) > 0):
+                                existing_ctx = best
+                        elif a_type == "Brute Force":
+                            # A Brute Force batch absorbs a lingering handshake-only
+                            # (Unknown/DDoS) session so one attack isn't split.
+                            if best.get("attack_type") in ("Unknown", "DDoS"):
+                                existing_ctx = best
 
                 if existing_ctx and existing_ctx.get("status") == "ongoing":
                     ctx = existing_ctx
                     status = "ongoing"
                     ctx["last_seen"] = now
 
-                    # Accumulate metrics across log batches dynamically
                     ctx["connection_count"] += int(row["connection_count"])
                     ctx["success_count"] += int(row["success_count"])
                     ctx["failed_count"] += int(row["failed_count"])
-                    ctx["unique_passwords"] = max(ctx["unique_passwords"], int(row["unique_passwords"]))
+                    ctx["unique_passwords"] += int(row["unique_passwords"])
                     ctx["command_count"] += int(row["command_count"])
                     ctx["suspicious_commands"] += int(row["suspicious_commands"])
                     ctx["commands"] = _merge_commands(ctx.get("commands"), new_commands)
                     if not ctx.get("destination_port") and dst_port:
                         ctx["destination_port"] = dst_port
+
+                    # Re-derive the type from accumulated evidence so an "Unknown"
+                    # handshake can become DDoS (pure flood) or Brute Force (logins).
+                    re_type = self.classify_attack_type(ctx)
+                    if re_type != ctx["attack_type"]:
+                        old_key = (ip, ctx["attack_type"])
+                        ctx["attack_type"] = re_type
+                        self.context_table.pop(old_key, None)
+                        self.context_table[(ip, re_type)] = ctx
 
                     duration = now - ctx["start_time"]
                     ctx["severity"] = self.calculate_severity(ctx, ongoing_duration=duration)
@@ -291,7 +317,7 @@ class DynamicAttackTracker:
                             "connection_count": db_ctx["connection_count"] + int(row["connection_count"]),
                             "success_count": db_ctx["success_count"] + int(row["success_count"]),
                             "failed_count": db_ctx["failed_count"] + int(row["failed_count"]),
-                            "unique_passwords": max(db_ctx["unique_passwords"], int(row["unique_passwords"])),
+                            "unique_passwords": db_ctx["unique_passwords"] + int(row["unique_passwords"]),
                             "command_count": db_ctx["command_count"] + int(row["command_count"]),
                             "suspicious_commands": db_ctx["suspicious_commands"] + int(row["suspicious_commands"]),
                             "commands": _merge_commands(db_ctx.get("commands"), new_commands),
