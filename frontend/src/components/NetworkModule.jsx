@@ -53,8 +53,8 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
         const isTarget = displayAttack && (node.id === 'HONEY-NODE-X' || node.ip === displayAttack.ip);
         return {
           ...node,
-          cpu: isTarget ? Math.min(99, 94 + Math.random() * 5) : Math.max(5, Math.min(80, node.cpu + (Math.random() * 4 - 2))),
-          latency: isTarget ? (150 + Math.floor(Math.random() * 100)) + "ms" : (parseInt(node.latency) + Math.floor(Math.random() * 3 - 1)) + "ms",
+          cpu: isTarget ? 99 : node.cpu,
+          latency: isTarget ? '200ms' : node.latency,
           status: isTarget ? 'CRITICAL' : node.status
         };
       }));
@@ -67,12 +67,12 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
         });
       } else {
         setTraffic({
-          inbound: (1.3 + Math.random() * 0.4).toFixed(1) + ' GB/s',
+          inbound: '1.5 GB/s',
           outbound: 134 + ' GB/s'
         });
       }
 
-      setPacketCount(prev => prev + (displayAttack ? Math.floor(Math.random() * 2000) : Math.floor(Math.random() * 100)));
+      setPacketCount(prev => prev + (displayAttack ? 1500 : 50));
       
       if (displayAttack) {
         setAnalysisProgress(prev => (prev < 100 ? prev + 2 : 100));
@@ -248,7 +248,7 @@ const NetworkModule = ({ activeAttack, activeAttacks = [], onSelectAttack, serve
                     <div className="flux-wave" style={{ position: 'absolute', width: '100%', height: '3px', top: '50%' }}></div>
                     <div style={{ display: 'flex', alignItems: 'flex-end', height: '100%', gap: '2px' }}>
                         {[...Array(20)].map((_, i) => (
-                            <div key={i} style={{ flex: 1, background: displayAttack ? '#ff0000' : '#00ff41', height: (Math.random() * 80 + 10) + '%', opacity: 0.4 }} />
+                            <div key={i} style={{ flex: 1, background: displayAttack ? '#ff0000' : '#00ff41', height: (10 + (i % 8) * 10) + '%', opacity: 0.4 }} />
                         ))}
                     </div>
                 </div>

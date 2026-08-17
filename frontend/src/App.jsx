@@ -12,7 +12,7 @@ import Header from './components/Header';
 import ConfigModal from './components/ConfigModal';
 import LiveThreatsModule from './components/LiveThreatsModule';
 import RawAIModule from './components/RawAIModule';
-import { randomItem, generateRandomIP, createTestAttack, createDoubleAttackVectors, createLoopbackAttack } from './components/attackEngine';
+import { createTestAttack, createDoubleAttackVectors, createLoopbackAttack } from './components/attackEngine';
 import { sfx } from './logic/SFXEngine';
 import { getActiveAttackCount, getCombinedActiveAttacks, splitPrimaryAndSecondaryAttacks } from './logic/attackState';
 
@@ -68,11 +68,11 @@ function mapAttackContextToCard(ctx) {
     timestamp: ctx.last_seen_time || ctx.start_time || new Date().toISOString(),
     signal: ctx.signal || '',
 
-    // Geo mapping for LiveMap
-    loc: ctx.location || 'MISSING',
-    city: (ctx.location || 'MISSING').split(',')[0] || 'MISSING',
-    country: (ctx.location || 'MISSING').split(',')[1]?.trim() || 'MISSING',
-    coords: (ctx.latitude != null && ctx.longitude != null) ? { lat: ctx.latitude, lng: ctx.longitude } : null,
+    // Geo mapping for LiveMap — static Amman, Jordan
+    loc: ctx.location || 'Amman, Jordan',
+    city: (ctx.location || 'Amman, Jordan').split(',')[0] || 'Amman',
+    country: (ctx.location || 'Amman, Jordan').split(',')[1]?.trim() || 'Jordan',
+    coords: (ctx.latitude != null && ctx.longitude != null) ? { lat: ctx.latitude, lng: ctx.longitude } : { lat: 31.9454, lng: 35.9284 },
     
     // Legacy fields for compatibility with existing components
     eventTimeline: [],
@@ -393,7 +393,7 @@ function App() {
               received_at: utcRa || null,
               instance_count: instanceCount,
               startTime: Date.now(),
-              duration: 60000 + Math.random() * 30000,
+              duration: 60000,
               progress: 0,
               eventTimeline: timeline,
               connection_count: prediction.connection_count ?? alert.details?.connection_count ?? 0,
@@ -592,19 +592,19 @@ function App() {
           "[AI]_HEURISTIC_SCANNING...", "ENCRYPTING_NODE_DATA...", "REDIRECTING_TRAFFIC...",
           "[RIPv2]_TABLE_PROTECTION_ACTIVE...", "DEPLOYING_HONEYPOT_DECOYS..."
         ];
-        setLiveLog(logs[Math.floor(Math.random() * logs.length)]);
+        setLiveLog(logs[Math.floor(Date.now() / 1000) % logs.length]);
 
         if (activeTestAttack) {
           setActiveTestAttack(prev => prev ? ({
             ...prev,
-            livePayload: (Math.random() * 500 + 100).toFixed(1) + " MB/s"
+            livePayload: '124.5 MB/s'
           }) : null);
         }
 
         if (selectedNode && !selectedNode.isAttacker) {
           setSelectedNode(prev => prev ? ({
             ...prev,
-            latency: Math.floor(Math.random() * 150 + 200) + "ms"
+            latency: '250ms'
           }) : null);
         }
       }, 1000);
@@ -857,7 +857,7 @@ function App() {
         // Ù…Ø¯Ø© Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„ÙƒÙ„ Ù‡Ø¬Ù…Ø© (25-35 Ø«Ø§Ù†ÙŠØ©)
         const remaining = prev.filter(attack => {
           const attackStartTime = attack.startTime || Date.now();
-          const attackDuration = attack.duration || (40000 + Math.random() * 20000);
+          const attackDuration = attack.duration || (45000);
           return (now - attackStartTime) < attackDuration;
         });
 
@@ -883,7 +883,7 @@ function App() {
     setIsAttacked(newState);
     setShowOverlay(newState);
     if (newState) {
-      const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
+      const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 45000, progress: 0 };
       setActiveTestAttack(newAttack);
       setSelectedAttackForDetail(newAttack);
       setLastAttackForAlert(newAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
@@ -904,7 +904,7 @@ function App() {
   // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© Ù‡Ø¬Ù…Ø© Ø¬Ø¯ÙŠØ¯Ø© Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
   const addNewVector = () => {
     if (!isAttacked || settings.shieldActive) return;
-    const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
+    const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 45000, progress: 0 };
     setActiveAttacksWrapper(prev => [...prev, newAttack]);
     setLastAttackForAlert(newAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
     setShowOverlay(true);
@@ -927,8 +927,8 @@ function App() {
 
     const [attack1, attack2] = createDoubleAttackVectors();
     const startTime = Date.now();
-    const attackA = { ...attack1, startTime, duration: 40000 + Math.random() * 20000, progress: 0 };
-    const attackB = { ...attack2, startTime, duration: 40000 + Math.random() * 20000, progress: 0 };
+    const attackA = { ...attack1, startTime, duration: 45000, progress: 0 };
+    const attackB = { ...attack2, startTime, duration: 45000, progress: 0 };
     setSelectedAttackForDetail(null);
     setActiveTestAttack(attackA);
     setActiveAttacksWrapper([attackB]);
@@ -949,8 +949,8 @@ function App() {
     if (!isAttacked || settings.shieldActive) return;
     const [attack1, attack2] = createDoubleAttackVectors();
     const now = Date.now();
-    const primaryAttack = activeTestAttack || { ...attack1, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 };
-    const secondaryAttack = { ...attack2, startTime: now, duration: 40000 + Math.random() * 20000, progress: 0 };
+    const primaryAttack = activeTestAttack || { ...attack1, startTime: now, duration: 45000, progress: 0 };
+    const secondaryAttack = { ...attack2, startTime: now, duration: 45000, progress: 0 };
     setActiveTestAttack(primaryAttack);
     setActiveAttacksWrapper(prev => {
       const next = [...prev];
@@ -973,7 +973,7 @@ function App() {
     const startTime = Date.now();
     const newAttacks = [];
     for (let i = 0; i < count; i++) {
-      const a = { ...createTestAttack(), startTime, duration: 40000 + Math.random() * 20000, progress: 0 };
+      const a = { ...createTestAttack(), startTime, duration: 45000, progress: 0 };
       newAttacks.push(a);
     }
 
@@ -999,7 +999,7 @@ function App() {
     const addStartTime = Date.now();
     const newAttacks = [];
     for (let i = 0; i < count; i++) {
-      const a = { ...createTestAttack(), startTime: addStartTime, duration: 40000 + Math.random() * 20000, progress: 0 };
+      const a = { ...createTestAttack(), startTime: addStartTime, duration: 45000, progress: 0 };
       newAttacks.push(a);
     }
 
@@ -1019,7 +1019,7 @@ function App() {
 
   const startLoopbackAttack = (type) => {
     if (isAttacked || settings.shieldActive) return;
-    const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
+    const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 45000, progress: 0 };
     setActiveTestAttack(lbAttack);
     setSelectedAttackForDetail(lbAttack);
     setLastAttackForAlert(lbAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
@@ -1040,7 +1040,7 @@ function App() {
   // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© loopback attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
   const addLoopbackVector = (type) => {
     if (!isAttacked || settings.shieldActive) return;
-    const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 40000 + Math.random() * 20000, progress: 0 };
+    const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 45000, progress: 0 };
     if (!activeTestAttack) {
       setActiveTestAttack(lbAttack);
       setActiveAttacksWrapper([]);
@@ -1119,7 +1119,7 @@ function App() {
           ram: serverStats.ram,
           network: serverStats.network,
           os: "IOT-Kernel v4.2-Hardened",
-          latency: Math.floor(Math.random() * 50 + (isAttacked ? 150 : 10)) + "ms",
+          latency: (isAttacked ? 200 : 25) + "ms",
           uptime: "12d 04h 22m",
           firewall: isAttacked ? "!!! BREACHED !!!" : "ACTIVE (Encrypted)",
           security_score: isAttacked ? "CRITICAL (22%)" : "SECURE (98%)"

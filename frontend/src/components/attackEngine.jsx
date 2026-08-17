@@ -1,9 +1,9 @@
-import { THREAT_POOL, GEO_POOL } from '../data/attackData';
+// Deterministic unique id (no Math.random) — time-based prefix + monotonic counter.
+let _seq = 0;
+const nextId = (prefix) => `${prefix}-${Date.now().toString(36).toUpperCase()}-${String(++_seq).padStart(3, '0')}`;
 
-export const randomItem = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-export const generateRandomIP = () => 
-  `${Math.floor(Math.random() * 254) + 1}.${Math.floor(Math.random() * 254)}.${Math.floor(Math.random() * 254)}.${Math.floor(Math.random() * 254)}`;
+// Fixed external attacker used by the demo/test generators.
+const EXTERNAL_ATTACKER_IP = '185.220.101.45';
 
 // دالة لإنشاء timeline الأحداث للهجمة
 export const generateEventTimeline = () => {
@@ -21,103 +21,102 @@ export const generateEventTimeline = () => {
   return events;
 };
 
-// --- الدالة الأصلية المعدلة لتشريح الموقع ---
+// --- هجوم خارجي ثابت (SSH brute force) — بيانات واقعية وثابتة بدون عشوائية ---
 export const createTestAttack = () => {
-  const randomThreat = randomItem(THREAT_POOL);
-  const randomGeo = randomItem(GEO_POOL);
-  
-  // تشريح نص الموقع (مثلاً "Moscow, RU" إلى مدينة ودولة)
-  const geoParts = randomGeo.loc.split(', ');
-  const city = geoParts[0] || "MISSING";
-  const country = geoParts[1] || "MISSING";
-
-  const attackId = 'EV-' + Math.floor(Math.random() * 90000 + 10000);
-  const sharedIp = generateRandomIP(); // single IP used for both src_ip and ip
+  const attackId = nextId('EV');
   return {
     id: attackId,
     sfxId: `SFX-${attackId}`, // معرف صوت منفصل لكل هجمة
     counterId: `COUNTER-${attackId}`, // عداد منفصل لكل هجمة
     date: new Date().toISOString().replace('T', ' ').split('.')[0],
-    type: randomThreat.type,
-    attack: randomThreat.type,
-    attack_type: randomThreat.type,
-    src_ip: sharedIp,
-    ip: sharedIp,
-    port: randomThreat.port,
-    proto: randomThreat.proto,
-    loc: randomGeo.loc,
-    city: city,      // إضافة حقل المدينة بشكل منفصل
-    country: country, // إضافة حقل الدولة بشكل منفصل
-    threat: (Math.floor(Math.random() * 20) + 80) + '%',
-    severity: (Math.floor(Math.random() * 20) + 80) + '%',
-    severityScore: Math.floor(Math.random() * 20) + 80,
-    coords: { lat: randomGeo.lat, lng: randomGeo.lng },
+    type: 'SSH BRUTE FORCE',
+    attack: 'SSH BRUTE FORCE',
+    attack_type: 'SSH BRUTE FORCE',
+    src_ip: EXTERNAL_ATTACKER_IP,
+    ip: EXTERNAL_ATTACKER_IP,
+    port: '2222',
+    proto: 'TCP/SSH',
+    loc: 'Amman, Jordan',
+    city: 'Amman',
+    country: 'JO',
+    threat: '92%',
+    severity: 'HIGH',
+    severityScore: 80,
+    coords: { lat: 31.9454, lng: 35.9284 },
     status: 'DETECTED & LOGGED',
     packetSize: '1500 MTU',
-    isp: 'MISSING',
+    isp: 'TOR_EXIT_NODE',
     reputation: 'MALICIOUS',
     livePayload: '124.5 MB/s',
-    // إضافة الحقول الجديدة
-    connection_count: Math.floor(Math.random() * 500 + 50),
-    success_count: Math.floor(Math.random() * 30 + 5),
-    failed_count: Math.floor(Math.random() * 100 + 20),
-    unique_passwords: Math.floor(Math.random() * 150 + 30),
-    command_count: Math.floor(Math.random() * 80 + 15),
-    suspicious_commands: Math.floor(Math.random() * 25 + 5),
-    // إضافة timeline الأحداث
+    // حقول ثابتة واقعية
+    connection_count: 120,
+    success_count: 1,
+    failed_count: 118,
+    unique_passwords: 45,
+    command_count: 3,
+    suspicious_commands: 2,
+    // timeline الأحداث
     eventTimeline: generateEventTimeline()
   };
 };
 
-// --- الدالة الجديدة لهجوم الـ Loopback مع إحداثيات الأردن وحصر المنافذ ---
+// --- هجوم الـ Loopback ببيانات ثابتة (بدون عشوائية) ---
 export const createLoopbackAttack = (typeKey) => {
   const configs = {
-    // تم حصر الهجمات في نوعين وتعديل المنافذ لتكون 2222 و 2223 فقط
-    'BRUTE': { type: "BRUTE_FORCE_AUTH", port: "2222", desc: "SSH_MANAGEMENT_ATTEMPT" },
-    'DDOS': { type: "DDoS_UDP_FLOOD", port: "2223", desc: "INTERNAL_BACKDOOR_OVERLOAD" },
+    'BRUTE': {
+      type: 'BRUTE_FORCE_AUTH', port: '2222', desc: 'SSH_MANAGEMENT_ATTEMPT',
+      threat: '92%', severity: 'HIGH', severityScore: 80,
+      connection_count: 85, success_count: 0, failed_count: 85,
+      unique_passwords: 40, command_count: 0, suspicious_commands: 0
+    },
+    'DDOS': {
+      type: 'DDoS_UDP_FLOOD', port: '2223', desc: 'INTERNAL_BACKDOOR_OVERLOAD',
+      threat: '99%', severity: 'EXTREME', severityScore: 99,
+      connection_count: 5000, success_count: 0, failed_count: 0,
+      unique_passwords: 0, command_count: 0, suspicious_commands: 0
+    },
   };
-  
+
   const selected = configs[typeKey];
+  const attackId = nextId('LB');
   return {
-    id: 'LB-' + Math.floor(Math.random() * 90000 + 10000),
+    id: attackId,
     date: new Date().toISOString().replace('T', ' ').split('.')[0],
     type: selected.type,
     attack: selected.type,
     attack_type: selected.type,
-    src_ip: "MISSING",
-    ip: "MISSING",
+    src_ip: 'MISSING',
+    ip: 'MISSING',
     port: selected.port,
-    proto: "TCP/UDP",
-    loc: "Amman, JO", // تحديد الموقع للأردن
-    city: "Amman",
-    country: "JO",
-    threat: "99%",
-    severity: "99%",
-    severityScore: 99,
-    coords: { lat: 31.9454, lng: 35.9239 }, // إحداثيات عمان، الأردن
+    proto: 'TCP/UDP',
+    loc: 'Amman, Jordan',
+    city: 'Amman',
+    country: 'JO',
+    threat: selected.threat,
+    severity: selected.severity,
+    severityScore: selected.severityScore,
+    coords: { lat: 31.9454, lng: 35.9284 },
     status: 'INTERNAL_BREACH_DETECTED',
     packetSize: '65535 MTU',
     isp: 'INTERNAL_LOOPBACK',
     reputation: 'SYSTEM_OWNED',
     livePayload: 'INTERNAL_BUS',
     detail: selected.desc,
-    // إضافة الحقول الجديدة
-    connection_count: Math.floor(Math.random() * 1000 + 500),
-    success_count: Math.floor(Math.random() * 100 + 50),
-    failed_count: Math.floor(Math.random() * 200 + 100),
-    unique_passwords: Math.floor(Math.random() * 300 + 150),
-    command_count: Math.floor(Math.random() * 200 + 100),
-    suspicious_commands: Math.floor(Math.random() * 80 + 40),
-    // إضافة timeline الأحداث
+    connection_count: selected.connection_count,
+    success_count: selected.success_count,
+    failed_count: selected.failed_count,
+    unique_passwords: selected.unique_passwords,
+    command_count: selected.command_count,
+    suspicious_commands: selected.suspicious_commands,
     eventTimeline: generateEventTimeline()
   };
 };
 
 export const createDoubleAttackVectors = () => {
   const attack1 = createTestAttack();
-  const attack2 = createTestAttack();
+  const attack2 = createLoopbackAttack('DDOS');
   return [
-    { ...attack1, id: `EV-VECTOR-1-${Math.floor(Math.random() * 9000 + 1000)}` },
-    { ...attack2, id: `EV-VECTOR-2-${Math.floor(Math.random() * 9000 + 1000)}` }
+    { ...attack1, id: nextId('EV-VECTOR-1') },
+    { ...attack2, id: nextId('EV-VECTOR-2') }
   ];
 };

@@ -227,7 +227,7 @@ const HistoryModule = ({ historyList, onClearHistory }) => {
                       ['NETWORK_ISP', selectedHistory.isp || 'MISSING', ''],
                       ['PROTOCOL', selectedHistory.proto || 'UDP', ''],
                       ['LOCATION', (selectedHistory.loc || selectedHistory.city || 'MISSING').toUpperCase(), ''],
-                      ['TARGET_PORT', selectedHistory.port || '37777', ''],
+                      ['TARGET_PORT', selectedHistory.port || '2222', ''],
                       ['ATTACK_TYPE', selectedHistory.attack_type || selectedHistory.type, '#ff9900'],
                       ['THREAT_LEVEL (severity)', selectedHistory.severity || 'MISSING', '#ff0000'],
                       ['COORDINATES', selectedHistory.coords ? `${selectedHistory.coords.lat}, ${selectedHistory.coords.lng}` : '', ''],

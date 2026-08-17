@@ -112,7 +112,7 @@ const SettingsModal = ({ isOpen, onClose, settings, setSettings }) => {
                 <div className="visualizer">
                   {[...Array(20)].map((_, i) => (
                     <div key={i} className="bar" style={{ 
-                      height: `${Math.random() * 100}%`,
+                      height: `${10 + (i % 10) * 9}%`,
                       opacity: (i / 20) < settings.alertVolume ? 1 : 0.1 
                     }}></div>
                   ))}

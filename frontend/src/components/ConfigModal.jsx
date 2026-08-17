@@ -105,7 +105,7 @@ const ConfigModal = ({ settings, setSettings, activeTab, setActiveTab }) => {
                         key={i} 
                         style={{ 
                           flex: 1, 
-                          height: `${settings.alertVolume > 0 ? (Math.random() * 100) * settings.alertVolume : 2}%`, 
+                          height: `${settings.alertVolume > 0 ? ((10 + (i % 10) * 9) * settings.alertVolume) : 2}%`, 
                           background: (settings.alertVolume > 0.8 && i > 32) ? '#ff0000' : '#00ff41', 
                           opacity: settings.alertVolume > 0 ? 0.8 : 0.2, 
                           transition: 'height 0.15s ease' 
