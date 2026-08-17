@@ -547,7 +547,6 @@ function App() {
             const mapped = mapAttackContextToCard(ctx);
             if (ctx.attack_status === 'ended') {
               setActiveAttacks(prev => prev.filter(a => a.attack_context_id !== ctx.attack_id));
-              addToHistory({ ...mapped, status: 'MITIGATED' });
             } else if (ctx.attack_status === 'new' || ctx.attack_status === 'ongoing' || ctx.attack_status === 'renewed') {
               hasActive = true;
               setActiveAttacks(prev => {
@@ -557,7 +556,6 @@ function App() {
                 }
                 return [mapped, ...prev];
               });
-              addToHistory(mapped);
             }
           });
 
@@ -582,6 +580,31 @@ function App() {
     const interval = setInterval(fetchAttackContext, 5000);
     return () => clearInterval(interval);
   }, [addToHistory, activeTestAttack]);
+
+  // ── Poll /ai/history (append-only archive of ENDED attacks) ──
+  // History tab is fed exclusively from this table; only finalized attacks
+  // (written server-side on attack end) show up here.
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+        const res = await fetch(`${backendUrl}/ai/history?limit=100&_t=${Date.now()}`, {
+          headers: { 'Cache-Control': 'no-store' }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.status === 'success' && Array.isArray(data.history)) {
+          setHistoryList(data.history.map(mapAttackContextToCard));
+        }
+      } catch (e) {
+        console.warn('[history] fetch error:', e);
+      }
+    };
+
+    fetchHistory(); // immediate
+    const interval = setInterval(fetchHistory, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let liveInterval;

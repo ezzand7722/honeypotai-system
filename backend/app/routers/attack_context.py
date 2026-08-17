@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.services.persistence import load_recent_attack_contexts, _connect_postgres, _release_conn
+from app.services.persistence import load_recent_attack_contexts, load_attack_history, archive_ended_attack, _connect_postgres, _release_conn
 
 router = APIRouter()
 log = logging.getLogger("honeypot.attack_context")
@@ -188,6 +188,16 @@ def list_attack_contexts(
     }
 
 
+@router.get("/history")
+def list_attack_history(
+    limit: int = Query(100, ge=1, le=500),
+) -> Dict[str, Any]:
+    """Return finalized (ended) attacks from the immutable attack_history table."""
+    rows = load_attack_history(limit)
+    normalized = [normalize_ai_output_for_frontend(row) for row in rows]
+    return {"status": "success", "count": len(normalized), "history": normalized}
+
+
 @router.get("/attack-context/active")
 def list_active_attacks() -> Dict[str, Any]:
     """Return only new + ongoing attack sessions."""
@@ -231,6 +241,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
                 (attack_id,)
             )
             conn.commit()
+            archive_ended_attack(attack_id)
             
         # Also remove from live contexts if it exists there
         if attack_id in _live_contexts:

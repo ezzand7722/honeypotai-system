@@ -100,12 +100,19 @@ try:
 
     def sweep_expired_sessions_db() -> None:
         """Sweeps stale active sessions in database directly (idle > 1 hour) to handle restart drift."""
-        from app.services.persistence import _connect_postgres, _use_postgres, _release_conn
+        from app.services.persistence import _connect_postgres, _use_postgres, _release_conn, archive_ended_attack
         if not _use_postgres():
             return
         conn = _connect_postgres()
+        expired_ids = []
         try:
             with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT attack_id FROM public.attack_context
+                    WHERE attack_status IN ('new', 'ongoing', 'renewed')
+                      AND last_seen_time < NOW() - INTERVAL '1 hour'
+                """)
+                expired_ids = [r[0] for r in cur.fetchall()]
                 cur.execute("""
                     UPDATE public.attack_context
                     SET attack_status = 'ended',
@@ -119,6 +126,12 @@ try:
             log.error("Failed to sweep expired sessions in DB: %s", e)
         finally:
             _release_conn(conn)
+
+        for aid in expired_ids:
+            try:
+                archive_ended_attack(aid)
+            except Exception as e:
+                log.error("Failed to archive expired session %s: %s", aid, e)
 
     def on_attack_ended(payload):
         """Callback fired by DynamicAttackTracker when an IP is idle for 1 hour."""

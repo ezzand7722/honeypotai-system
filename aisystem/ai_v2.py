@@ -234,16 +234,25 @@ class DynamicAttackTracker:
                 new_commands = list(row.get("commands") or [])
                 dst_port = _as_int(row.get("destination_port"))
 
-                # Check if an existing context already exists for this IP regardless of type to prevent splitting/flipping
-                existing_ctx = None
-                existing_key = None
-                for key, ctx in self.context_table.items():
-                    if key[0] == ip and ctx["status"] == "ongoing":
-                        existing_ctx = ctx
-                        existing_key = key
-                        break
+                # Classify the attack type from THIS batch. It is used only when
+                # creating a brand-new session; an existing session keeps its
+                # original type (sticky) so a trailing command-only chunk of a
+                # brute-force session does not flip into "Command Injection".
+                a_type = self.classify_attack_type(row)
+                context_key = (ip, a_type)
 
-                if existing_ctx:
+                # Session identity = (src_ip, attack_type). DDoS and Brute Force
+                # from the same IP stay separate. A chunk with only commands (or
+                # otherwise ambiguous) continues the most recently active session
+                # for this IP instead of spawning a new "Command Injection".
+                existing_ctx = self.context_table.get(context_key)
+                if existing_ctx is None and a_type in ("Command Injection", "Unknown"):
+                    for ctx in self.context_table.values():
+                        if ctx.get("src_ip") == ip and ctx.get("status") == "ongoing":
+                            if existing_ctx is None or ctx.get("last_seen", 0) > existing_ctx.get("last_seen", 0):
+                                existing_ctx = ctx
+
+                if existing_ctx and existing_ctx.get("status") == "ongoing":
                     ctx = existing_ctx
                     status = "ongoing"
                     ctx["last_seen"] = now
@@ -260,14 +269,9 @@ class DynamicAttackTracker:
                         ctx["destination_port"] = dst_port
 
                     duration = now - ctx["start_time"]
-                    sev = self.calculate_severity(ctx, ongoing_duration=duration)
-                    ctx["severity"] = sev
+                    ctx["severity"] = self.calculate_severity(ctx, ongoing_duration=duration)
                     ctx["status"] = status
                 else:
-                    # Classify only once on session creation using aggregated initial row metrics
-                    a_type = self.classify_attack_type(row)
-                    context_key = (ip, a_type)
-
                     # Restore session state from DB across restarts if available
                     db_ctx = None
                     if self.db_lookup_callback:

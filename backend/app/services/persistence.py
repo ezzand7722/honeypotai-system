@@ -211,6 +211,35 @@ def initialize_database() -> None:
                 cur.execute("""
                     ALTER TABLE public.attack_context ADD COLUMN IF NOT EXISTS destination_port INT
                 """)
+                # Append-only archive of finalized (ended) attacks. Never truncated
+                # by the DB reset loop — this is what the frontend History tab reads.
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS public.attack_history (
+                        id BIGSERIAL PRIMARY KEY,
+                        attack_id VARCHAR(36) NOT NULL,
+                        src_ip VARCHAR(45) NOT NULL,
+                        attack_type VARCHAR(50),
+                        attack_status VARCHAR(20),
+                        severity VARCHAR(20),
+                        connection_count INT NOT NULL DEFAULT 0,
+                        failed_count INT NOT NULL DEFAULT 0,
+                        success_count INT NOT NULL DEFAULT 0,
+                        unique_passwords INT NOT NULL DEFAULT 0,
+                        command_count INT NOT NULL DEFAULT 0,
+                        suspicious_cmds INT NOT NULL DEFAULT 0,
+                        commands JSONB,
+                        start_time TIMESTAMP,
+                        last_seen_time TIMESTAMP,
+                        ended_time TIMESTAMP,
+                        renewed_count INT NOT NULL DEFAULT 0,
+                        location VARCHAR(255),
+                        latitude DOUBLE PRECISION,
+                        longitude DOUBLE PRECISION,
+                        destination_port INT,
+                        archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        UNIQUE(attack_id, ended_time)
+                    )
+                """)
             conn.commit()
         finally:
             _release_conn(conn)
@@ -293,6 +322,35 @@ def initialize_database() -> None:
                 conn.execute("ALTER TABLE attack_context ADD COLUMN destination_port INTEGER")
             except Exception:
                 pass
+            # Append-only archive of finalized (ended) attacks. Never truncated
+            # by the DB reset loop — this is what the frontend History tab reads.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS attack_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    attack_id TEXT NOT NULL,
+                    src_ip TEXT NOT NULL,
+                    attack_type TEXT,
+                    attack_status TEXT,
+                    severity TEXT,
+                    connection_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    success_count INTEGER NOT NULL DEFAULT 0,
+                    unique_passwords INTEGER NOT NULL DEFAULT 0,
+                    command_count INTEGER NOT NULL DEFAULT 0,
+                    suspicious_cmds INTEGER NOT NULL DEFAULT 0,
+                    commands TEXT,
+                    start_time TEXT,
+                    last_seen_time TEXT,
+                    ended_time TEXT,
+                    renewed_count INTEGER NOT NULL DEFAULT 0,
+                    location TEXT,
+                    latitude REAL,
+                    longitude REAL,
+                    destination_port INTEGER,
+                    archived_at TEXT NOT NULL,
+                    UNIQUE(attack_id, ended_time)
+                )
+            """)
             conn.commit()
         finally:
             _release_conn(conn)
@@ -377,6 +435,8 @@ def upsert_attack_context(ai_output: dict) -> None:
             log.error("Failed to upsert attack_context: %s", e)
         finally:
             _release_conn(conn)
+        if attack_status == "ended":
+            archive_ended_attack(attack_id)
         return
 
     # SQLite fallback
@@ -420,6 +480,9 @@ def upsert_attack_context(ai_output: dict) -> None:
             log.error("Failed to upsert attack_context (SQLite): %s", e)
         finally:
             _release_conn(conn)
+
+    if attack_status == "ended":
+        archive_ended_attack(attack_id)
 
 
 def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
@@ -470,6 +533,124 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
                     results.append(rec)
             except Exception as e:
                 log.error("load_recent_attack_contexts sqlite error: %s", e)
+            finally:
+                _release_conn(conn)
+    return results
+
+
+def archive_ended_attack(attack_id: str) -> None:
+    """Copy an ended attack_context row into the append-only attack_history table.
+
+    Idempotent (UNIQUE on (attack_id, ended_time)) and never truncated by the
+    reset loop, so the frontend History tab can show past attacks forever.
+    """
+    if not attack_id:
+        return
+
+    if _use_postgres():
+        conn = _connect_postgres()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO public.attack_history (
+                        attack_id, src_ip, attack_type, attack_status, severity,
+                        connection_count, failed_count, success_count,
+                        unique_passwords, command_count, suspicious_cmds, commands,
+                        start_time, last_seen_time, ended_time, renewed_count,
+                        location, latitude, longitude, destination_port
+                    )
+                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                           connection_count, failed_count, success_count,
+                           unique_passwords, command_count, suspicious_cmds, commands,
+                           start_time, last_seen_time, ended_time, renewed_count,
+                           location, latitude, longitude, destination_port
+                    FROM public.attack_context
+                    WHERE attack_id = %s AND attack_status = 'ended'
+                    ON CONFLICT (attack_id, ended_time) DO NOTHING
+                """, (attack_id,))
+            conn.commit()
+            log.info("Archived ended attack %s to attack_history", attack_id)
+        except Exception as e:
+            log.error("Failed to archive ended attack %s: %s", attack_id, e)
+        finally:
+            _release_conn(conn)
+        return
+
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO attack_history (
+                    attack_id, src_ip, attack_type, attack_status, severity,
+                    connection_count, failed_count, success_count,
+                    unique_passwords, command_count, suspicious_cmds, commands,
+                    start_time, last_seen_time, ended_time, renewed_count,
+                    location, latitude, longitude, destination_port, archived_at
+                )
+                SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                       connection_count, failed_count, success_count,
+                       unique_passwords, command_count, suspicious_cmds, commands,
+                       start_time, last_seen_time, ended_time, renewed_count,
+                       location, latitude, longitude, destination_port, ?
+                FROM attack_context
+                WHERE attack_id = ? AND attack_status = 'ended'
+            """, (_utc_now(), attack_id))
+            conn.commit()
+            log.info("Archived ended attack %s to attack_history (SQLite)", attack_id)
+        except Exception as e:
+            log.error("Failed to archive ended attack %s (SQLite): %s", attack_id, e)
+        finally:
+            _release_conn(conn)
+
+
+def load_attack_history(limit: int = 200) -> list[dict]:
+    """Load finalized attacks from the immutable attack_history table."""
+    results = []
+    if _use_postgres():
+        conn = _connect_postgres()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                           connection_count, failed_count, success_count,
+                           unique_passwords, command_count, suspicious_cmds, commands,
+                           start_time, last_seen_time, ended_time,
+                           location, latitude, longitude, destination_port, archived_at
+                    FROM public.attack_history
+                    ORDER BY ended_time DESC, id DESC
+                    LIMIT %s
+                """, (limit,))
+                cols = [d[0] for d in cur.description]
+                for row in cur.fetchall():
+                    results.append(dict(zip(cols, row)))
+        except Exception as e:
+            log.error("load_attack_history postgres error: %s", e)
+        finally:
+            _release_conn(conn)
+    else:
+        with _lock:
+            conn = _connect()
+            try:
+                cursor = conn.execute("""
+                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                           connection_count, failed_count, success_count,
+                           unique_passwords, command_count, suspicious_cmds, commands,
+                           start_time, last_seen_time, ended_time,
+                           location, latitude, longitude, destination_port, archived_at
+                    FROM attack_history
+                    ORDER BY ended_time DESC, id DESC
+                    LIMIT ?
+                """, (limit,))
+                for row in cursor.fetchall():
+                    rec = dict(row)
+                    if isinstance(rec.get("commands"), str):
+                        try:
+                            rec["commands"] = json.loads(rec["commands"])
+                        except Exception:
+                            rec["commands"] = []
+                    results.append(rec)
+            except Exception as e:
+                log.error("load_attack_history sqlite error: %s", e)
             finally:
                 _release_conn(conn)
     return results
