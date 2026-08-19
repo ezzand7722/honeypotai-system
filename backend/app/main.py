@@ -55,9 +55,10 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def on_startup():
-        if settings.db_reset_interval_minutes > 0:
-            asyncio.create_task(_db_reset_loop(settings.db_reset_interval_minutes))
-            logger.info("DB_RESET: Auto-reset scheduled every %.1f minute(s)", settings.db_reset_interval_minutes)
+        reset_mins = settings.effective_db_reset_minutes()
+        if reset_mins > 0:
+            asyncio.create_task(_db_reset_loop(reset_mins))
+            logger.info("DB_RESET: Auto-reset scheduled every %.1f minute(s)", reset_mins)
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

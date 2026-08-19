@@ -159,10 +159,8 @@ def list_attack_contexts(
     limit: int = Query(50, ge=1, le=200),
     status: Optional[str] = Query(None, description="Filter by attack_status: new, ongoing, ended")
 ) -> Dict[str, Any]:
-    """Return all attack sessions (from DB + live in-memory overlay)."""
-    # Load from DB
-    db_rows = load_recent_attack_contexts(limit)
-    # Merge with live in-memory contexts (live takes priority)
+    """Return attack sessions (from DB). One active card per src_ip (richest metrics)."""
+    db_rows = load_recent_attack_contexts(max(limit, 100))
     merged: Dict[str, Dict] = {}
     for row in db_rows:
         aid = row.get("attack_id", "")
@@ -171,14 +169,34 @@ def list_attack_contexts(
                 **row,
                 "suspicious_cmds": row.get("suspicious_cmds", 0)
             })
-    # Override with live data - REMOVED because it bypasses DB state transitions (like renewed)
     results = list(merged.values())
 
-    # Apply status filter
     if status:
         results = [r for r in results if r["attack_status"] == status]
+    else:
+        # Default live feed: hide ended so UI does not thrash add/remove
+        results = [r for r in results if r["attack_status"] != "ended"]
 
-    # Sort by last_seen_time desc, then by severity_score desc
+    def _metric_score(r: Dict) -> int:
+        return (
+            int(r.get("failed_count") or 0)
+            + int(r.get("unique_passwords") or 0)
+            + int(r.get("command_count") or 0)
+            + int(r.get("connection_count") or 0)
+            + int(r.get("success_count") or 0)
+        )
+
+    # Collapse multiple sessions for the same IP into one card (richest wins).
+    by_ip: Dict[str, Dict] = {}
+    for r in results:
+        ip = r.get("src_ip") or r.get("attack_id") or ""
+        if not ip:
+            continue
+        prev = by_ip.get(ip)
+        if prev is None or _metric_score(r) >= _metric_score(prev):
+            by_ip[ip] = r
+    results = list(by_ip.values())
+
     results.sort(key=lambda x: (x.get("last_seen_time") or "", x.get("severity_score", 0)), reverse=True)
 
     return {

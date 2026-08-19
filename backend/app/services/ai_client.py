@@ -176,13 +176,13 @@ try:
         except Exception as e:
             log.error("Failed to process expired session payload: %s", e)
 
-    # Short session boundary so a fresh attack from the same IP/type does not
-    # accumulate on top of an earlier (now idle) session.
+    # 5 min idle boundary — long enough for multi-chunk log uploads without
+    # splitting one attack into many attack_ids (which caused UI flicker).
     global_tracker = DynamicAttackTracker(
-        expiry_seconds=60.0, 
+        expiry_seconds=300.0,
         callback_on_ended=on_attack_ended
     )
-    log.info("Successfully initialized stateful DynamicAttackTracker with 60s expiry and DB lookup!")
+    log.info("Successfully initialized stateful DynamicAttackTracker with 300s expiry and DB lookup!")
 except ImportError as e:
     log.error("Failed to import DynamicAttackTracker from ai_v2: %s", e)
     global_tracker = None
