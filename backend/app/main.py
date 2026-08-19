@@ -18,10 +18,28 @@ logger = logging.getLogger("honeypot.api")
 settings = get_settings()
 
 
-async def _db_reset_loop(interval_minutes: float) -> None:
+async def _db_idle_reset_loop(idle_seconds: float) -> None:
+    """Wipe live tables only after `idle_seconds` with no honeypot/log ingest."""
+    from app.services.activity import seconds_since_last_ingest, touch_ingest_activity
+
+    # Start the idle clock at boot so we don't wipe immediately on startup
+    touch_ingest_activity()
+    check_every = min(15.0, max(5.0, idle_seconds / 10.0))
+    logger.info(
+        "DB_RESET: Idle reset armed — wipe after %.1f min with no ingest (check every %.0fs)",
+        idle_seconds / 60.0,
+        check_every,
+    )
     while True:
-        await asyncio.sleep(interval_minutes * 60)
-        logger.info("DB_RESET: Truncating all database tables (interval=%.1fm)", interval_minutes)
+        await asyncio.sleep(check_every)
+        idle_for = seconds_since_last_ingest()
+        if idle_for < idle_seconds:
+            continue
+        logger.info(
+            "DB_RESET: Idle %.1fs >= %.1fs — truncating live tables + tracker",
+            idle_for,
+            idle_seconds,
+        )
         try:
             truncate_all_tables()
             from app.services.reporting import _store
@@ -32,9 +50,12 @@ async def _db_reset_loop(interval_minutes: float) -> None:
                     global_tracker.reset()
             except Exception as e:
                 logger.error("DB_RESET: Failed to reset in-memory tracker: %s", e)
-            logger.info("DB_RESET: Database and in-memory store cleared successfully")
+            # Restart idle clock after wipe so we don't loop-wipe every check
+            touch_ingest_activity()
+            logger.info("DB_RESET: Database and in-memory store cleared successfully (idle)")
         except Exception as e:
             logger.error("DB_RESET: Failed to truncate tables: %s", e)
+            touch_ingest_activity()
 
 
 def create_app() -> FastAPI:
@@ -55,10 +76,11 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def on_startup():
-        reset_mins = settings.effective_db_reset_minutes()
-        if reset_mins > 0:
-            asyncio.create_task(_db_reset_loop(reset_mins))
-            logger.info("DB_RESET: Auto-reset scheduled every %.1f minute(s)", reset_mins)
+        idle_secs = settings.effective_idle_reset_seconds()
+        if idle_secs > 0:
+            asyncio.create_task(_db_idle_reset_loop(idle_secs))
+        else:
+            logger.info("DB_RESET: Idle reset disabled (db_idle_reset_minutes=0)")
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

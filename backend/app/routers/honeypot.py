@@ -12,6 +12,7 @@ import os
 
 from app.config import get_settings
 from app.schemas.event import RawHoneypotRecord
+from app.services.activity import touch_ingest_activity
 from app.services.ai_client import submit_batch_for_scoring, submit_for_scoring
 from app.services.honeypot_ingest import normalize_event
 from app.services.log_file_ingest import parse_honeypot_file, _map_to_raw_record
@@ -62,6 +63,7 @@ async def ingest_honeypot_event(
 
     event = normalize_event(mapped_record)
     logger.info("INGEST single event event_id=%s src=%s vec=%s", event.event_id, event.source_ip, event.attack_vector)
+    touch_ingest_activity()
     raw_payload = mapped_record.model_dump(mode="json")
     normalized_payload = event.model_dump(mode="json")
     await asyncio.to_thread(record_alert, event, None, None, raw_payload, normalized_payload)
@@ -151,6 +153,7 @@ async def ingest_honeypot_events_batch(
     pipeline_id = str(uuid4())
     events = [normalize_event(item) for item in mapped_records]
     raw_logs = [item.model_dump(mode="json") for item in mapped_records]
+    touch_ingest_activity()
 
     for index, event in enumerate(events):
         await asyncio.to_thread(
@@ -210,6 +213,7 @@ async def ingest_honeypot_events_from_file(
                 logger.warning("FILE_EMPTY_BG pipeline_id=%s path=%s", pipeline_id, saved_path)
                 return
 
+            touch_ingest_activity()
             events = [normalize_event(item) for item in raw_records]
             raw_logs = [item.model_dump(mode="json") for item in raw_records]
 
@@ -243,6 +247,7 @@ async def ingest_honeypot_events_from_file(
                 logger.error("BATCH_INGEST_FAILED_EVENTS pipeline_id=%s failed_ids=%r", pipeline_id, failed_ids)
 
             await submit_batch_for_scoring(events, raw_logs, pipeline_id, chunk_size_val)
+            touch_ingest_activity()
             logger.info("FILE_INGEST_BG_COMPLETE pipeline_id=%s", pipeline_id)
         except Exception as e:
             logger.error("FILE_INGEST_BG_ERROR pipeline_id=%s error=%s", pipeline_id, e, exc_info=True)

@@ -267,6 +267,13 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
         log.error("DynamicAttackTracker not initialized! Returning empty results.")
         return {}
 
+    if formatted_logs:
+        try:
+            from app.services.activity import touch_ingest_activity
+            touch_ingest_activity()
+        except Exception:
+            pass
+
     # Run the logs through the in-memory engine (which is thread-safe)
     # We run it in a threadpool to not block the asyncio event loop during pandas/sklearn ops
     try:

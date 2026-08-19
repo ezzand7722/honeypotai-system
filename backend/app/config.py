@@ -16,8 +16,11 @@ class Settings(BaseSettings):
     ai_chunk_pause_ms: int = 0
     database_url: Optional[str] = None
     database_path: str = "data/honeypot_events.db"
-    # Prefer minutes; if only DB_RESET_INTERVAL_HOURS is set in .env, main.py maps it.
-    db_reset_interval_minutes: float = 60
+    # Wipe live tables only after this many minutes with NO log/event ingest.
+    # 0 = disable idle reset. Env: DB_IDLE_RESET_MINUTES=2.5
+    db_idle_reset_minutes: float = 2.5
+    # Legacy fixed-interval knobs (ignored when idle reset is active)
+    db_reset_interval_minutes: float = 0
     db_reset_interval_hours: Optional[float] = None
     geoip_db_path: str = "data/GeoLite2-City.mmdb"
 
@@ -27,11 +30,10 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    def effective_db_reset_minutes(self) -> float:
-        """Hours env wins when set (droplet .env uses DB_RESET_INTERVAL_HOURS)."""
-        if self.db_reset_interval_hours is not None and self.db_reset_interval_hours > 0:
-            return float(self.db_reset_interval_hours) * 60.0
-        return float(self.db_reset_interval_minutes or 0)
+    def effective_idle_reset_seconds(self) -> float:
+        """Seconds of no ingest before live DB wipe. 0 = off."""
+        mins = float(self.db_idle_reset_minutes or 0)
+        return max(0.0, mins * 60.0)
 
 
 @lru_cache()
