@@ -441,7 +441,10 @@ function App() {
             }
 
             if (!initialPoll && isRecentAlert && !discardedAlertIds.current.has(alertId)) {
-              setActiveTestAttack(currTest => {
+              // Skip setting activeTestAttack if AI already has a card for this IP (I11)
+              const aiAlreadyHasIp = activeAttacks.some(a => (a.ip || a.src_ip) === alert.src_ip);
+              if (aiAlreadyHasIp) { /* AI card takes priority, don't spawn duplicate */ }
+              else setActiveTestAttack(currTest => {
                 const isCurrentlyActive = (currTest && currTest.id === alertId) || activeAttacks.some(a => a.id === alertId);
                 
                 if (isNewAlert || isCurrentlyActive) {
@@ -567,7 +570,7 @@ function App() {
           } else {
             setActiveAttacks(prev => {
               const active = prev.filter(a => data.attack_contexts.some(c => c.attack_id === a.attack_context_id && c.attack_status !== 'ended'));
-              if (active.length === 0 && !activeTestAttack) {
+              if (active.length === 0) {
                 setIsAttacked(false);
               }
               return active;
@@ -582,7 +585,7 @@ function App() {
     fetchAttackContext(); // immediate
     const interval = setInterval(fetchAttackContext, 1000);
     return () => clearInterval(interval);
-  }, [addToHistory, activeTestAttack]);
+  }, [addToHistory]);
 
   // ── Poll /ai/history (append-only archive of ENDED attacks) ──
   // History tab is fed exclusively from this table; only finalized attacks

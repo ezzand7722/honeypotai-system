@@ -251,7 +251,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
         # Reset the in-memory AI session so future logs for this attacker start fresh
         try:
             from app.services.ai_client import global_tracker
-            if global_tracker:
+            if global_tracker and hasattr(global_tracker, 'end_session'):
                 global_tracker.end_session(attack_id=attack_id)
         except Exception as e:
             log.warning("Failed to reset in-memory tracker session %s: %s", attack_id, e)

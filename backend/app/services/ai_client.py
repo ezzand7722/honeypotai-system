@@ -180,8 +180,7 @@ try:
     # accumulate on top of an earlier (now idle) session.
     global_tracker = DynamicAttackTracker(
         expiry_seconds=60.0, 
-        callback_on_ended=on_attack_ended,
-        db_lookup_callback=db_lookup_session
+        callback_on_ended=on_attack_ended
     )
     log.info("Successfully initialized stateful DynamicAttackTracker with 60s expiry and DB lookup!")
 except ImportError as e:
@@ -280,6 +279,63 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
     if results:
         for r in results:
             results_by_ip[r.get("src_ip")] = r
+
+    # Re-derive attack_type from accumulated counts to fix single-event
+    # misclassification (I2) and restore Command Injection category (I8).
+    for ip, result in results_by_ip.items():
+        failed = result.get("failed_count", 0)
+        success = result.get("success_count", 0)
+        unique_passwords = result.get("unique_passwords", 0)
+        command_count = result.get("command_count", 0)
+        connection_count = result.get("connection_count", 0)
+
+        if failed >= 1 or unique_passwords >= 1 or success >= 1:
+            result["attack_type"] = "Brute Force"
+        elif command_count >= 1:
+            result["attack_type"] = "Command Injection"
+        elif connection_count >= 3:
+            result["attack_type"] = "DDoS"
+        else:
+            result["attack_type"] = "Unknown"
+
+    # Reconstruct commands and destination_port from formatted_logs (I3, I4, I7).
+    # Groups logs by src_ip and extracts command strings + dst_port.
+    import re as _re
+    _ip_commands: dict[str, list[str]] = {}
+    _ip_dst_port: dict[str, int | None] = {}
+    for log_item in formatted_logs:
+        lip = log_item.get("src_ip")
+        if not lip:
+            continue
+        # Extract destination port
+        dp = log_item.get("dst_port")
+        if dp and lip not in _ip_dst_port:
+            try:
+                _ip_dst_port[lip] = int(dp)
+            except (ValueError, TypeError):
+                pass
+        # Extract command from known fields
+        eid = str(log_item.get("eventid", "")).lower()
+        cmd = None
+        if "command" in eid or "input" in eid:
+            # Try input, then message, then command fields
+            for field in ("input", "message", "command"):
+                val = log_item.get(field)
+                if val and str(val).strip() and str(val).strip().lower() != "nan":
+                    cmd = str(val).strip()[:500]
+                    break
+        if not cmd:
+            for field in ("input", "command", "cmd"):
+                val = log_item.get(field)
+                if val and str(val).strip() and str(val).strip().lower() != "nan":
+                    cmd = str(val).strip()[:500]
+                    break
+        if cmd:
+            _ip_commands.setdefault(lip, []).append(cmd)
+
+    for ip, result in results_by_ip.items():
+        result["commands"] = _ip_commands.get(ip, [])
+        result["destination_port"] = _ip_dst_port.get(ip)
 
     # Extract location from the incoming logs so we don't do a second mmdb lookup
     ip_to_geo = {}
