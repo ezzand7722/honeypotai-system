@@ -14,28 +14,53 @@ const LiveThreatsModule = ({
   // دون حذف أي بيانات أو ميزات
   const allAttacks = useMemo(() => {
     const attacks = [];
+    const seenIps = new Set();
+    const pushUnique = (a) => {
+      if (!a) return;
+      const ip = a.ip || a.src_ip || a.id;
+      if (seenIps.has(ip)) return;
+      seenIps.add(ip);
+      attacks.push(a);
+    };
+    // AI attack-context cards first (richer data, take priority)
     if (activeAttacks && activeAttacks.length > 0) {
-      // نعتمد المصفوفة النشطة لأنها تحتوي بالفعل على كل المتجهات المطلوبة
-      attacks.push(...activeAttacks);
+      activeAttacks.forEach(pushUnique);
     }
+    // Only add basic alert card if no AI card exists for this IP
     if (activeTestAttack) {
-      // أضف activeTestAttack إذا لم يكن موجوداً ضمن activeAttacks
-      if (!attacks.some((a) => a.id === activeTestAttack.id)) {
-        attacks.push(activeTestAttack);
-      }
+      pushUnique(activeTestAttack);
     }
     return attacks;
   }, [activeAttacks, activeTestAttack]);
 
   const [selectedAttack, setSelectedAttack] = useState(null);
 
+  // Keep selection stable by IP (not attack_id) so poll refreshes don't flip the card
   useEffect(() => {
-    if (!selectedAttack || !allAttacks.some((attack) => attack.id === selectedAttack.id)) {
-      setSelectedAttack(allAttacks.length > 0 ? allAttacks[0] : null);
+    if (allAttacks.length === 0) {
+      setSelectedAttack(null);
+      return;
     }
-  }, [allAttacks, selectedAttack]);
+    setSelectedAttack(prev => {
+      if (!prev) return allAttacks[0];
+      const prevIp = prev.ip || prev.src_ip || prev.id;
+      const live =
+        allAttacks.find(a => a.id === prev.id) ||
+        allAttacks.find(a => (a.ip || a.src_ip || a.id) === prevIp);
+      return live || allAttacks[0];
+    });
+  }, [allAttacks]);
 
-  const displayAttack = selectedAttack || (allAttacks.length > 0 ? allAttacks[0] : null);
+  const displayAttack = (() => {
+    if (!selectedAttack) return allAttacks[0] || null;
+    const ip = selectedAttack.ip || selectedAttack.src_ip || selectedAttack.id;
+    return (
+      allAttacks.find(a => a.id === selectedAttack.id) ||
+      allAttacks.find(a => (a.ip || a.src_ip || a.id) === ip) ||
+      allAttacks[0] ||
+      null
+    );
+  })();
 
   return (
     <div className="module-content" style={{ 

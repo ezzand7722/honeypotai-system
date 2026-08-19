@@ -109,6 +109,20 @@ function App() {
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
   const [activeTestAttack, setActiveTestAttack] = useState(null);
   const [activeAttacks, setActiveAttacks] = useState([]);
+  const activeAttacksRef = useRef([]);
+  // Keep ref in sync so stale closures can read current value
+  useEffect(() => { activeAttacksRef.current = activeAttacks; }, [activeAttacks]);
+  
+  // Ensure the detail view doesn't freeze with old snapshots
+  useEffect(() => {
+    setSelectedAttackForDetail(prevSelected => {
+      if (!prevSelected) return prevSelected;
+      const liveData = activeAttacks.find(a => a.id === prevSelected.id) 
+                       || (activeTestAttack?.id === prevSelected.id ? activeTestAttack : null);
+      return liveData ? liveData : prevSelected;
+    });
+  }, [activeAttacks, activeTestAttack]);
+
   // Debug wrapper to trace unexpected additions to activeAttacks
   const setActiveAttacksWrapper = (updater) => {
     setActiveAttacks(prev => {
@@ -440,54 +454,24 @@ function App() {
               // The user hates the forced popup, so we don't call setShowOverlay(true) here anymore.
             }
 
+            // Basic /report/alerts cards are demos only. Real metrics come from
+            // /ai/attack-context. Never spawn a second card for an IP the AI owns.
             if (!initialPoll && isRecentAlert && !discardedAlertIds.current.has(alertId)) {
-              // Skip setting activeTestAttack if AI already has a card for this IP (I11)
-              const aiAlreadyHasIp = activeAttacks.some(a => (a.ip || a.src_ip) === alert.src_ip);
-              if (aiAlreadyHasIp) { /* AI card takes priority, don't spawn duplicate */ }
-              else setActiveTestAttack(currTest => {
-                const isCurrentlyActive = (currTest && currTest.id === alertId) || activeAttacks.some(a => a.id === alertId);
-                
-                if (isNewAlert || isCurrentlyActive) {
-                  // Fetch stats and update active lists
-                  fetch(`${import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'}/report/attacker-stats?src_ip=${alert.src_ip}`).then(r => r.json()).then(d => {
-                    if (d?.stats) {
-                      setActiveAttacksWrapper(curr => curr.map(a => a.id === mappedAttack.id ? { ...a, ...d.stats } : a));
-                      setActiveTestAttack(currT => currT?.id === mappedAttack.id ? { ...currT, ...d.stats } : currT);
-                    }
-                  }).catch(()=>{});
-
-                  if (!currTest || currTest.id === mappedAttack.id) {
-                    return { 
-                      ...(currTest || {}), 
-                      ...mappedAttack, 
-                      startTime: currTest?.startTime ?? mappedAttack.startTime, 
-                      duration: currTest?.duration ?? mappedAttack.duration, 
-                      progress: currTest?.progress ?? mappedAttack.progress 
-                    };
-                  } else {
-                    // Enrich existing AI contexts instead of spawning basic fake cards!
-                    setActiveAttacksWrapper(prev => {
-                      return prev.map(a => {
-                        // Match basic alert to AI context by IP
-                        if (a.ip === mappedAttack.ip || a.src_ip === mappedAttack.ip) {
-                          const newTimeline = mappedAttack.eventTimeline || [];
-                          const existingTimeline = a.eventTimeline || [];
-                          // simple dedup by timestamp
-                          const mergedTimeline = [...existingTimeline, ...newTimeline].filter((v,i,arr)=>arr.findIndex(t=>(t.timestamp===v.timestamp))===i);
-                          
-                          return { 
-                            ...a, 
-                            eventTimeline: mergedTimeline,
-                          };
-                        }
-                        return a;
-                      });
-                    });
-                    return currTest;
-                  }
-                }
-                return currTest;
-              });
+              const aiAlreadyHasIp = activeAttacksRef.current.some(a => (a.ip || a.src_ip) === alert.src_ip);
+              if (aiAlreadyHasIp) {
+                // no-op: AI card is source of truth
+              } else if (isNewAlert) {
+                setActiveTestAttack(currTest => {
+                  if (currTest && currTest.id !== mappedAttack.id) return currTest;
+                  return {
+                    ...(currTest || {}),
+                    ...mappedAttack,
+                    startTime: currTest?.startTime ?? mappedAttack.startTime,
+                    duration: currTest?.duration ?? mappedAttack.duration,
+                    progress: currTest?.progress ?? mappedAttack.progress,
+                  };
+                });
+              }
             }
           });
         }
@@ -538,6 +522,9 @@ function App() {
   }, []);
 
   // ── Poll /ai/attack-context (AI v2 normalized output) ──
+  // ONE atomic setState per poll. Dedupe by IP (keep richest card).
+  // Never N× setState in a forEach — that caused 1s card flicker.
+  const emptyContextPollsRef = useRef(0);
   useEffect(() => {
     const fetchAttackContext = async () => {
       try {
@@ -547,45 +534,80 @@ function App() {
         });
         if (!res.ok) return;
         const data = await res.json();
-        if (data.status === 'success' && Array.isArray(data.attack_contexts)) {
-          let hasActive = false;
-          data.attack_contexts.forEach(ctx => {
-            const mapped = mapAttackContextToCard(ctx);
-            if (ctx.attack_status === 'ended') {
-              setActiveAttacks(prev => prev.filter(a => a.attack_context_id !== ctx.attack_id));
-            } else if (ctx.attack_status === 'new' || ctx.attack_status === 'ongoing' || ctx.attack_status === 'renewed') {
-              hasActive = true;
-              setActiveAttacks(prev => {
-                const exists = prev.find(a => a.attack_context_id === ctx.attack_id);
-                if (exists) {
-                  return prev.map(a => a.attack_context_id === ctx.attack_id ? { ...a, ...mapped } : a);
-                }
-                return [mapped, ...prev];
-              });
-            }
-          });
+        if (data.status !== 'success' || !Array.isArray(data.attack_contexts)) return;
 
-          if (hasActive) {
-            setIsAttacked(true);
-          } else {
-            setActiveAttacks(prev => {
-              const active = prev.filter(a => data.attack_contexts.some(c => c.attack_id === a.attack_context_id && c.attack_status !== 'ended'));
-              if (active.length === 0) {
-                setIsAttacked(false);
-              }
-              return active;
-            });
+        const score = (c) =>
+          (Number(c.failedCount) || 0) +
+          (Number(c.uniquePasswords) || 0) +
+          (Number(c.commandCount) || 0) +
+          (Number(c.connectionCount) || 0) +
+          (Number(c.successCount) || 0);
+
+        const byIp = new Map();
+        for (const ctx of data.attack_contexts) {
+          if (!ctx || ctx.attack_status === 'ended') continue;
+          if (!['new', 'ongoing', 'renewed'].includes(ctx.attack_status)) continue;
+          const mapped = mapAttackContextToCard(ctx);
+          const ip = mapped.ip || mapped.src_ip || mapped.id;
+          if (!ip) continue;
+          const prev = byIp.get(ip);
+          if (!prev || score(mapped) >= score(prev)) {
+            byIp.set(ip, mapped);
           }
+        }
+
+        const nextList = Array.from(byIp.values());
+
+        if (nextList.length > 0) {
+          emptyContextPollsRef.current = 0;
+        } else {
+          emptyContextPollsRef.current += 1;
+        }
+
+        setActiveAttacks(prev => {
+          // Hold last AI cards for ~12 empty polls (~18s) so a DB blip can't wipe UI
+          if (nextList.length === 0) {
+            if (emptyContextPollsRef.current < 12) {
+              return prev.filter(a => a.attack_context_id);
+            }
+            return prev.filter(a => !a.attack_context_id);
+          }
+          return nextList.map(mapped => {
+            const old =
+              prev.find(a => a.attack_context_id === mapped.attack_context_id) ||
+              prev.find(a => (a.ip || a.src_ip) === (mapped.ip || mapped.src_ip));
+            if (!old) {
+              return { ...mapped, startTime: Date.now(), duration: 600000, progress: 0 };
+            }
+            return {
+              ...old,
+              ...mapped,
+              startTime: old.startTime || Date.now(),
+              duration: old.duration || 600000,
+              progress: old.progress || 0,
+              eventTimeline: old.eventTimeline || mapped.eventTimeline || [],
+            };
+          });
+        });
+
+        if (nextList.length > 0) {
+          setIsAttacked(true);
+          setActiveTestAttack(curr => {
+            if (!curr) return curr;
+            const ip = curr.ip || curr.src_ip;
+            if (ip && byIp.has(ip)) return null;
+            return curr;
+          });
         }
       } catch (e) {
         console.warn('[attack-context] fetch error:', e);
       }
     };
 
-    fetchAttackContext(); // immediate
-    const interval = setInterval(fetchAttackContext, 1000);
+    fetchAttackContext();
+    const interval = setInterval(fetchAttackContext, 1500);
     return () => clearInterval(interval);
-  }, [addToHistory]);
+  }, []);
 
   // ── Poll /ai/history (append-only archive of ENDED attacks) ──
   // History tab is fed exclusively from this table; only finalized attacks
@@ -820,6 +842,11 @@ function App() {
           });
 
           const remaining = updated.filter(attack => {
+            // Never auto-remove AI-sourced cards — they are managed by
+            // the /ai/attack-context poll which removes them when the
+            // backend reports attack_status='ended'.
+            if (attack.attack_context_id) return true;
+
             if ((attack.progress || 0) >= 100) {
 
                 discardedAlertIds.current.add(attack.id);
@@ -853,27 +880,32 @@ function App() {
     return () => clearInterval(progressInterval);
   }, [isAttacked, activeTestAttack, activeAttacks, settings.scanSpeed, settings.autoMitigation]);
 
-  // --- ØªØ£Ø«ÙŠØ± Ø¬Ø¯ÙŠØ¯: Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø¹Ù†Ø¯Ù…Ø§ ØªÙ†ØªÙ‡ÙŠ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© ---
+  // Auto-finalize ONLY demo/test attacks. AI cards are owned by the backend
+  // poll — a 50ms empty gap used to wipe the whole UI (flicker + wrong last card).
   useEffect(() => {
     if (!isAttacked) return;
 
+    const hasAiCards = activeAttacks.some(a => a.attack_context_id);
     const hasActiveAttacks = activeAttacks.length > 0;
     const hasTestAttack = activeTestAttack && (activeTestAttack.progress || 0) < 100;
 
-    if (!hasActiveAttacks && !hasTestAttack) {
+    // Never auto-kill while AI sessions exist (or may still be polling in)
+    if (hasAiCards || hasActiveAttacks) return;
+    if (hasTestAttack) return;
+
+    // Demo-only path: grace period so a single empty poll cannot finalize
+    const timer = setTimeout(() => {
+      if (activeAttacksRef.current.length > 0) return;
       window.speechSynthesis.cancel();
       isSpeaking.current = false;
       if (sirenAudio.current) {
         sirenAudio.current.pause();
         sirenAudio.current.currentTime = 0;
       }
+      finalizeAttackAndSave();
+    }, 8000);
 
-      const timer = setTimeout(() => {
-        finalizeAttackAndSave();
-      }, 50);
-
-      return () => clearTimeout(timer);
-    }
+    return () => clearTimeout(timer);
   }, [isAttacked, activeTestAttack, activeAttacks, finalizeAttackAndSave]);
 
   // --- ØªØ£Ø«ÙŠØ± Ø¬Ø¯ÙŠØ¯: Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª ØªÙ„Ù‚Ø§Ø¦ÙŠØ§Ù‹ Ø¨Ø¹Ø¯ Ù…Ø¯Ø© Ù…Ø¹ÙŠÙ†Ø© ---
@@ -885,6 +917,7 @@ function App() {
         const now = Date.now();
         // Ù…Ø¯Ø© Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„ÙƒÙ„ Ù‡Ø¬Ù…Ø© (25-35 Ø«Ø§Ù†ÙŠØ©)
         const remaining = prev.filter(attack => {
+          if (attack.attack_context_id) return true; // AI attacks end via backend status
           const attackStartTime = attack.startTime || Date.now();
           const attackDuration = attack.duration || (45000);
           return (now - attackStartTime) < attackDuration;
