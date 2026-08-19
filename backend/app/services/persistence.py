@@ -193,8 +193,7 @@ def initialize_database() -> None:
                         location          VARCHAR(255) NULL,
                         latitude          DOUBLE PRECISION NULL,
                         longitude         DOUBLE PRECISION NULL,
-                        destination_port  INT NULL,
-                        UNIQUE(src_ip, attack_type)
+                        destination_port  INT NULL
                     )
                 """)
                 cur.execute("""
@@ -210,6 +209,19 @@ def initialize_database() -> None:
                 """)
                 cur.execute("""
                     ALTER TABLE public.attack_context ADD COLUMN IF NOT EXISTS destination_port INT
+                """)
+                # Drop the old UNIQUE(src_ip, attack_type) constraint from the
+                # already-created Supabase table.  The attack_type can now change
+                # mid-session (via re-derive), so the PK (attack_id) is the only
+                # conflict target we need.
+                cur.execute("""
+                    DO $$
+                    BEGIN
+                        ALTER TABLE public.attack_context
+                            DROP CONSTRAINT IF EXISTS attack_context_src_ip_attack_type_key;
+                    EXCEPTION WHEN undefined_object THEN
+                        NULL;
+                    END $$;
                 """)
                 # Append-only archive of finalized (ended) attacks. Never truncated
                 # by the DB reset loop — this is what the frontend History tab reads.
@@ -310,8 +322,7 @@ def initialize_database() -> None:
                     location          TEXT NULL,
                     latitude          REAL NULL,
                     longitude         REAL NULL,
-                    destination_port  INTEGER NULL,
-                    UNIQUE(src_ip, attack_type)
+                    destination_port  INTEGER NULL
                 )
             """)
             try:
@@ -409,7 +420,9 @@ def upsert_attack_context(ai_output: dict) -> None:
                         start_time, last_seen_time, ended_time,
                         location, latitude, longitude, destination_port
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, NOW(), NOW(), %s, %s, %s, %s, %s)
-                    ON CONFLICT (src_ip, attack_type) DO UPDATE SET
+                    ON CONFLICT (attack_id) DO UPDATE SET
+                        src_ip            = EXCLUDED.src_ip,
+                        attack_type       = EXCLUDED.attack_type,
                         attack_status     = CASE 
                                                 WHEN EXCLUDED.attack_status = 'ended' THEN 'ended'
                                                 WHEN attack_context.attack_status = 'ended' AND EXCLUDED.attack_status IN ('ongoing', 'new') THEN 'renewed'
