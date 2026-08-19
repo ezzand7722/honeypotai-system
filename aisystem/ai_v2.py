@@ -9,12 +9,57 @@ from sklearn.ensemble import IsolationForest
 # Word-boundary safe suspicious command markers to prevent partial matches (e.g., 'ssh' matching 'sh')
 SUSPICIOUS_PATTERN = r'\b(?:wget|curl|chmod|rm|nc|bash|sh|uname|ls|pwd|mkdir|cd|python|perl|exec)\b'
 
+BOOKKEEPING_COLUMNS = {"source_line", "source_file"}
+
 class DynamicAttackTracker:
+    _MAX_SEEN_EVENTS = 100_000
+
     def __init__(self, expiry_seconds=10.0, callback_on_ended=None):
         self.expiry_seconds = expiry_seconds
         self.callback_on_ended = callback_on_ended
         self.context_table = {}
+        self._seen_events = {}
         self.lock = threading.Lock()
+
+    @staticmethod
+    def _event_key(ev):
+        """Stable content identity for an event (excludes uuid: file-ingest records may share one)."""
+        if not isinstance(ev, dict):
+            return None
+        return (
+            str(ev.get("src_ip") or ev.get("source_ip") or ""),
+            str(ev.get("eventid") or ""),
+            str(ev.get("timestamp") or ""),
+            str(ev.get("session") or ""),
+            str(ev.get("input") or ev.get("command") or ""),
+            str(ev.get("username") or ""),
+            str(ev.get("password") or ""),
+        )
+
+    def _drop_duplicate_events(self, raw_logs):
+        """Skip already-ingested events so re-uploading the same file does not inflate counts."""
+        if not isinstance(raw_logs, list):
+            return raw_logs
+        fresh = []
+        with self.lock:
+            for ev in raw_logs:
+                key = self._event_key(ev)
+                if key is None or not any(key):
+                    fresh.append(ev)
+                    continue
+                if key in self._seen_events:
+                    continue
+                self._seen_events[key] = None
+                if len(self._seen_events) > self._MAX_SEEN_EVENTS:
+                    for old in list(self._seen_events)[: self._MAX_SEEN_EVENTS // 2]:
+                        self._seen_events.pop(old, None)
+                fresh.append(ev)
+        return fresh
+
+    def _forget_ip(self, ip):
+        ip = str(ip)
+        for key in [k for k in self._seen_events if k[0] == ip]:
+            self._seen_events.pop(key, None)
 
     def _is_suspicious(self, text):
         text = str(text).lower()
@@ -82,9 +127,16 @@ class DynamicAttackTracker:
 
             # Build commands_list first to enable accurate command and suspicious counting
             commands_list = []
-            cmd_cols = [c for c in group.columns if any(k in c.lower() for k in ["command", "cmd", "input", "exec", "terminal", "shell", "line"])]
+            cmd_source = group
+            if "eventid" in group.columns:
+                cmd_source = group[~group["eventid"].astype(str).str.lower().str.contains("telnet.option", na=False)]
+            cmd_cols = [
+                c for c in cmd_source.columns
+                if c.lower() not in BOOKKEEPING_COLUMNS
+                and any(k in c.lower() for k in ["command", "cmd", "input", "exec", "terminal", "shell"])
+            ]
             for ccol in cmd_cols:
-                valid_cmds = group[ccol].dropna().astype(str)
+                valid_cmds = cmd_source[ccol].dropna().astype(str)
                 commands_list.extend([c for c in valid_cmds if c.strip() and c.lower() != "nan"])
             
             # Check raw_message or message fields for command inputs if needed
@@ -179,6 +231,7 @@ class DynamicAttackTracker:
             return "Low"
 
     def process_incoming_logs(self, raw_logs):
+        raw_logs = self._drop_duplicate_events(raw_logs)
         df_features = self.extract_features_from_logs(raw_logs)
         if df_features.empty:
             return []
@@ -302,6 +355,7 @@ class DynamicAttackTracker:
                     if self.callback_on_ended:
                         self.callback_on_ended(ended_payload)
                     self.context_table.pop(key, None)
+                    self._forget_ip(ctx.get("src_ip"))
 
     def end_session(self, attack_id=None):
         """Remove an in-memory session by attack_id (or all if None).
@@ -312,12 +366,15 @@ class DynamicAttackTracker:
         with self.lock:
             if attack_id is None:
                 self.context_table.clear()
+                self._seen_events.clear()
                 return
             for key, ctx in list(self.context_table.items()):
                 if ctx.get("attack_id") == attack_id:
                     self.context_table.pop(key, None)
+                    self._forget_ip(ctx.get("src_ip"))
 
     def reset(self):
         """Clear all in-memory session state (used on DB reset / startup)."""
         with self.lock:
             self.context_table.clear()
+            self._seen_events.clear()
