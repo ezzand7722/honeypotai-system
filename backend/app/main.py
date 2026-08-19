@@ -26,6 +26,12 @@ async def _db_reset_loop(interval_minutes: float) -> None:
             truncate_all_tables()
             from app.services.reporting import _store
             _store.clear()
+            try:
+                from app.services.ai_client import global_tracker
+                if global_tracker and hasattr(global_tracker, "reset"):
+                    global_tracker.reset()
+            except Exception as e:
+                logger.error("DB_RESET: Failed to reset in-memory tracker: %s", e)
             logger.info("DB_RESET: Database and in-memory store cleared successfully")
         except Exception as e:
             logger.error("DB_RESET: Failed to truncate tables: %s", e)

@@ -126,7 +126,8 @@ class DynamicAttackTracker:
                 "failed_count": total_fails,
                 "unique_passwords": uniq_pwd,
                 "command_count": cmd_c,
-                "suspicious_commands": susp_c
+                "suspicious_commands": susp_c,
+                "password_values": list(pwd_values)
             })
 
         return pd.DataFrame(extracted)
@@ -215,7 +216,10 @@ class DynamicAttackTracker:
                     ctx["connection_count"] += row["connection_count"]
                     ctx["success_count"] += row["success_count"]
                     ctx["failed_count"] += row["failed_count"]
-                    ctx["unique_passwords"] += int(row["unique_passwords"])
+                    _pw = set(ctx.get("_password_values", []))
+                    _pw.update(row.get("password_values", []))
+                    ctx["_password_values"] = sorted(_pw)
+                    ctx["unique_passwords"] = len(_pw)
                     ctx["command_count"] += row["command_count"]
                     ctx["suspicious_commands"] += row["suspicious_commands"]
 
@@ -246,6 +250,7 @@ class DynamicAttackTracker:
                         "start_time": now,
                         "last_seen": now
                     }
+                    ctx["_password_values"] = sorted(set(row.get("password_values", [])))
                     self.context_table[context_key] = ctx
 
                 out_payload = {
@@ -297,3 +302,22 @@ class DynamicAttackTracker:
                     if self.callback_on_ended:
                         self.callback_on_ended(ended_payload)
                     self.context_table.pop(key, None)
+
+    def end_session(self, attack_id=None):
+        """Remove an in-memory session by attack_id (or all if None).
+
+        Called when an attack is manually ended server-side so future logs for
+        the same attacker start from a clean slate instead of accumulating.
+        """
+        with self.lock:
+            if attack_id is None:
+                self.context_table.clear()
+                return
+            for key, ctx in list(self.context_table.items()):
+                if ctx.get("attack_id") == attack_id:
+                    self.context_table.pop(key, None)
+
+    def reset(self):
+        """Clear all in-memory session state (used on DB reset / startup)."""
+        with self.lock:
+            self.context_table.clear()
