@@ -681,6 +681,81 @@ def load_attack_history(limit: int = 200) -> list[dict]:
     return results
 
 
+def archive_active_attacks() -> None:
+    """End + archive any still-active attack_context rows into attack_history.
+
+    Called before the idle-reset truncate so finished sessions are not silently
+    lost from the History tab. Idempotent (ON CONFLICT DO NOTHING).
+    """
+    if _use_postgres():
+        conn = _connect_postgres()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE public.attack_context
+                    SET attack_status = 'ended',
+                        ended_time    = NOW()
+                    WHERE attack_status IN ('new', 'ongoing', 'renewed')
+                """)
+                cur.execute("""
+                    INSERT INTO public.attack_history (
+                        attack_id, src_ip, attack_type, attack_status, severity,
+                        connection_count, failed_count, success_count,
+                        unique_passwords, command_count, suspicious_cmds, commands,
+                        start_time, last_seen_time, ended_time, renewed_count,
+                        location, latitude, longitude, destination_port
+                    )
+                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                           connection_count, failed_count, success_count,
+                           unique_passwords, command_count, suspicious_cmds, commands,
+                           start_time, last_seen_time, ended_time, renewed_count,
+                           location, latitude, longitude, destination_port
+                    FROM public.attack_context
+                    WHERE attack_status = 'ended'
+                    ON CONFLICT (attack_id, ended_time) DO NOTHING
+                """)
+            conn.commit()
+            log.info("Archived active attacks to attack_history before reset")
+        except Exception as e:
+            log.error("Failed to archive active attacks before reset: %s", e)
+        finally:
+            _release_conn(conn)
+        return
+
+    with _lock:
+        conn = _connect()
+        try:
+            now = _utc_now()
+            conn.execute("""
+                UPDATE attack_context
+                SET attack_status = 'ended',
+                    ended_time    = ?
+                WHERE attack_status IN ('new', 'ongoing', 'renewed')
+            """, (now,))
+            conn.execute("""
+                INSERT OR IGNORE INTO attack_history (
+                    attack_id, src_ip, attack_type, attack_status, severity,
+                    connection_count, failed_count, success_count,
+                    unique_passwords, command_count, suspicious_cmds, commands,
+                    start_time, last_seen_time, ended_time, renewed_count,
+                    location, latitude, longitude, destination_port, archived_at
+                )
+                SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                       connection_count, failed_count, success_count,
+                       unique_passwords, command_count, suspicious_cmds, commands,
+                       start_time, last_seen_time, ended_time, renewed_count,
+                       location, latitude, longitude, destination_port, ?
+                FROM attack_context
+                WHERE attack_status = 'ended'
+            """, (now,))
+            conn.commit()
+            log.info("Archived active attacks to attack_history before reset (SQLite)")
+        except Exception as e:
+            log.error("Failed to archive active attacks before reset (SQLite): %s", e)
+        finally:
+            _release_conn(conn)
+
+
 def truncate_all_tables() -> None:
     tables = ["attack_events", "event_logs", "ai_results", "attack_context"]
     if _use_postgres():
@@ -953,6 +1028,163 @@ def persist_ai_result(event_id: str, prediction: AiPrediction) -> None:
                     updated_at = ?
                 WHERE event_id = ?
             """, (prediction.severity, float(prediction.risk_score), prediction.attack_id, now, event_id))
+            conn.commit()
+        finally:
+            _release_conn(conn)
+
+
+_BATCH_STATEMENT_ROWS = 500
+
+
+def persist_log_stages_batch(rows: list[tuple[str, str, dict[str, Any]]]) -> None:
+    """Batch persist_log_stage: one multi-row statement per slice instead of one
+    roundtrip per event. rows = [(event_id, stage, payload), ...]"""
+    if not rows:
+        return
+
+    if _use_postgres():
+        from psycopg import sql
+        conn = _connect_postgres()
+        try:
+            now = _utc_now()
+            with conn.cursor() as cur:
+                for i in range(0, len(rows), _BATCH_STATEMENT_ROWS):
+                    chunk = rows[i : i + _BATCH_STATEMENT_ROWS]
+                    values = sql.SQL(",").join(
+                        sql.SQL("({0}, {1}, {2}::jsonb, {3})").format(
+                            sql.Literal(event_id),
+                            sql.Literal(stage),
+                            sql.Literal(_json(payload)),
+                            sql.Literal(now),
+                        )
+                        for event_id, stage, payload in chunk
+                    )
+                    cur.execute(sql.SQL(
+                        "INSERT INTO public.event_logs (event_id, stage, payload, created_at) "
+                        "VALUES {0} "
+                        "ON CONFLICT (event_id, stage) DO UPDATE SET "
+                        "payload=EXCLUDED.payload, created_at=EXCLUDED.created_at"
+                    ).format(values))
+            conn.commit()
+        finally:
+            _release_conn(conn)
+        return
+
+    with _lock:
+        conn = _connect()
+        try:
+            now = _utc_now()
+            conn.executemany("""
+                INSERT INTO event_logs (event_id, stage, payload, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(event_id, stage) DO UPDATE SET
+                    payload=excluded.payload, created_at=excluded.created_at
+            """, [(event_id, stage, _json(payload), now) for event_id, stage, payload in rows])
+            conn.commit()
+        finally:
+            _release_conn(conn)
+
+
+def persist_ai_results_batch(rows: list[tuple[str, AiPrediction]]) -> None:
+    """Batch persist_ai_result: one multi-row INSERT into ai_results plus one
+    set-based UPDATE of attack_events per slice. rows = [(event_id, prediction), ...]"""
+    if not rows:
+        return
+
+    if _use_postgres():
+        from psycopg import sql
+        conn = _connect_postgres()
+        try:
+            now = _utc_now()
+            with conn.cursor() as cur:
+                for i in range(0, len(rows), _BATCH_STATEMENT_ROWS):
+                    chunk = rows[i : i + _BATCH_STATEMENT_ROWS]
+                    values = sql.SQL(",").join(
+                        sql.SQL("({0}, {1}, {2}, {3}, {4}, {5}, {6}::jsonb, {7})").format(
+                            sql.Literal(event_id),
+                            sql.Literal(prediction.model_version),
+                            sql.Literal(prediction.threat_level),
+                            sql.Literal(float(prediction.risk_score)),
+                            sql.Literal(float(prediction.confidence)),
+                            sql.Literal(prediction.summary),
+                            sql.Literal(_json(prediction.model_dump(mode="json"))),
+                            sql.Literal(now),
+                        )
+                        for event_id, prediction in chunk
+                    )
+                    cur.execute(sql.SQL(
+                        "INSERT INTO public.ai_results ("
+                        "event_id, model_version, threat_level, risk_score, confidence, summary, prediction_payload, processed_at"
+                        ") VALUES {0} "
+                        "ON CONFLICT(event_id) DO UPDATE SET "
+                        "model_version=EXCLUDED.model_version, threat_level=EXCLUDED.threat_level, "
+                        "risk_score=EXCLUDED.risk_score, confidence=EXCLUDED.confidence, "
+                        "summary=EXCLUDED.summary, prediction_payload=EXCLUDED.prediction_payload, "
+                        "processed_at=EXCLUDED.processed_at"
+                    ).format(values))
+
+                    upd_values = sql.SQL(",").join(
+                        sql.SQL("({0}, {1}, {2}, {3}, {4})").format(
+                            sql.Literal(event_id),
+                            sql.Literal(prediction.severity),
+                            sql.Literal(float(prediction.risk_score)),
+                            sql.Literal(prediction.attack_id),
+                            sql.Literal(now),
+                        )
+                        for event_id, prediction in chunk
+                    )
+                    cur.execute(sql.SQL(
+                        "UPDATE public.attack_events AS ae SET "
+                        "status='processed', severity=v.severity, risk_score=v.risk_score, "
+                        "attack_id=v.attack_id, updated_at=v.updated_at "
+                        "FROM (VALUES {0}) AS v(event_id, severity, risk_score, attack_id, updated_at) "
+                        "WHERE ae.event_id = v.event_id"
+                    ).format(upd_values))
+            conn.commit()
+        finally:
+            _release_conn(conn)
+        return
+
+    with _lock:
+        conn = _connect()
+        try:
+            now = _utc_now()
+            conn.executemany("""
+                INSERT INTO ai_results (
+                    event_id, model_version, threat_level, risk_score,
+                    confidence, summary, prediction_payload, processed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                    model_version=excluded.model_version,
+                    threat_level=excluded.threat_level,
+                    risk_score=excluded.risk_score,
+                    confidence=excluded.confidence,
+                    summary=excluded.summary,
+                    prediction_payload=excluded.prediction_payload,
+                    processed_at=excluded.processed_at
+            """, [
+                (
+                    event_id, prediction.model_version, prediction.threat_level,
+                    float(prediction.risk_score), float(prediction.confidence),
+                    prediction.summary, _json(prediction.model_dump(mode="json")), now,
+                )
+                for event_id, prediction in rows
+            ])
+            conn.executemany("""
+                UPDATE attack_events
+                SET status = 'processed',
+                    severity = ?,
+                    risk_score = ?,
+                    attack_id = ?,
+                    updated_at = ?
+                WHERE event_id = ?
+            """, [
+                (
+                    prediction.severity, float(prediction.risk_score),
+                    prediction.attack_id, now, event_id,
+                )
+                for event_id, prediction in rows
+            ])
             conn.commit()
         finally:
             _release_conn(conn)

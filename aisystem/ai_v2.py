@@ -13,6 +13,7 @@ BOOKKEEPING_COLUMNS = {"source_line", "source_file"}
 
 class DynamicAttackTracker:
     _MAX_SEEN_EVENTS = 100_000
+    _MAX_COMMANDS = 500
 
     def __init__(self, expiry_seconds=10.0, callback_on_ended=None):
         self.expiry_seconds = expiry_seconds
@@ -179,7 +180,8 @@ class DynamicAttackTracker:
                 "unique_passwords": uniq_pwd,
                 "command_count": cmd_c,
                 "suspicious_commands": susp_c,
-                "password_values": list(pwd_values)
+                "password_values": list(pwd_values),
+                "commands": commands_list
             })
 
         return pd.DataFrame(extracted)
@@ -275,6 +277,7 @@ class DynamicAttackTracker:
                     ctx["unique_passwords"] = len(_pw)
                     ctx["command_count"] += row["command_count"]
                     ctx["suspicious_commands"] += row["suspicious_commands"]
+                    ctx["_commands"] = (ctx.get("_commands", []) + list(row.get("commands") or []))[: self._MAX_COMMANDS]
 
                     duration = now - ctx["start_time"]
                     sev = self.calculate_severity(ctx, ongoing_duration=duration)
@@ -304,6 +307,7 @@ class DynamicAttackTracker:
                         "last_seen": now
                     }
                     ctx["_password_values"] = sorted(set(row.get("password_values", [])))
+                    ctx["_commands"] = list(row.get("commands") or [])[: self._MAX_COMMANDS]
                     self.context_table[context_key] = ctx
 
                 out_payload = {
@@ -319,6 +323,7 @@ class DynamicAttackTracker:
                     "unique_passwords": ctx["unique_passwords"],
                     "command_count": ctx["command_count"],
                     "suspicious_commands": ctx["suspicious_commands"],
+                    "commands": ctx.get("_commands", []),
                     "duration_seconds": round(now - ctx["start_time"], 2)
                 }
                 output_records.append(out_payload)
@@ -349,6 +354,7 @@ class DynamicAttackTracker:
                         "unique_passwords": ctx["unique_passwords"],
                         "command_count": ctx["command_count"],
                         "suspicious_commands": ctx["suspicious_commands"],
+                        "commands": ctx.get("_commands", []),
                         "signal": "STOP_SENDING_LOGS"
                     }
                     

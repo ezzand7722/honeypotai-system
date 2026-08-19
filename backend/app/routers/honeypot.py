@@ -203,7 +203,7 @@ async def ingest_honeypot_events_from_file(
     async def _process_file_ingest(
         saved_path: str,
         pipeline_id: str,
-        chunk_size_val: int,
+        chunk_size_val: Optional[int],
         max_records_val: Optional[int],
     ) -> None:
         try:
@@ -212,6 +212,11 @@ async def ingest_honeypot_events_from_file(
             if not raw_records:
                 logger.warning("FILE_EMPTY_BG pipeline_id=%s path=%s", pipeline_id, saved_path)
                 return
+
+            # AUTO mode: whole file as a single chunk (fastest, complete card at once)
+            if chunk_size_val is None:
+                chunk_size_val = min(max(1, len(raw_records)), 10_000)
+                logger.info("FILE_INGEST_AUTO_CHUNK pipeline_id=%s chunk_size=%s", pipeline_id, chunk_size_val)
 
             touch_ingest_activity()
             events = [normalize_event(item) for item in raw_records]
@@ -263,12 +268,14 @@ async def ingest_honeypot_events_from_file(
         if x_shared_secret != settings.honeypot_shared_secret:
             raise HTTPException(status_code=401, detail="Invalid honeypot credential")
 
-        # Use defaults if not provided
-        _chunk_size = chunk_size if chunk_size is not None else 25
+        # chunk_size omitted (or 0) = AUTO: process the whole file as one chunk.
         _max_records = max_records
-        
-        if _chunk_size < 1 or _chunk_size > 500:
-            raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
+        if chunk_size is None or chunk_size == 0:
+            _chunk_size = None  # resolved to len(records) after parsing
+        else:
+            if chunk_size < 1 or chunk_size > 500:
+                raise HTTPException(status_code=400, detail="chunk_size must be between 1 and 500")
+            _chunk_size = chunk_size
 
         file_path = os.path.join(tempfile.gettempdir(), f"{uuid4()}_{file.filename}")
         logger.info("FILE_UPLOAD_START path=%s filename=%s", file_path, file.filename)

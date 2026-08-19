@@ -41,6 +41,11 @@ async def _db_idle_reset_loop(idle_seconds: float) -> None:
             idle_seconds,
         )
         try:
+            try:
+                from app.services.persistence import archive_active_attacks
+                archive_active_attacks()
+            except Exception as e:
+                logger.error("DB_RESET: Failed to archive active attacks before wipe: %s", e)
             truncate_all_tables()
             from app.services.reporting import _store
             _store.clear()

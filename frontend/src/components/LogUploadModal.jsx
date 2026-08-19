@@ -9,7 +9,7 @@ const LogUploadModal = ({ onClose, onUploadComplete }) => {
   const [uploadStatus, setUploadStatus] = useState('idle'); // idle | uploading | success | error
   const [resultData, setResultData] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
-  const [chunkSize, setChunkSize] = useState(25);
+  const [chunkSize, setChunkSize] = useState(''); // '' = AUTO (whole file as one batch)
   const [maxRecords, setMaxRecords] = useState('');
   const fileInputRef = useRef(null);
 
@@ -66,7 +66,9 @@ const LogUploadModal = ({ onClose, onUploadComplete }) => {
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
-      formData.append('chunk_size', String(chunkSize));
+      if (chunkSize !== '' && parseInt(chunkSize) > 0) {
+        formData.append('chunk_size', String(parseInt(chunkSize)));
+      }
       if (maxRecords && parseInt(maxRecords) > 0) {
         formData.append('max_records', String(parseInt(maxRecords)));
       }
@@ -206,13 +208,17 @@ const LogUploadModal = ({ onClose, onUploadComplete }) => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
             <div>
               <div style={{ color: 'rgba(0,255,65,0.6)', fontSize: '10px', letterSpacing: '2px', marginBottom: '6px' }}>
-                CHUNK_SIZE (records per batch)
+                CHUNK_SIZE (blank = AUTO: full file in one batch)
               </div>
               <input
                 type="number"
                 min="1" max="500"
+                placeholder="AUTO"
                 value={chunkSize}
-                onChange={e => setChunkSize(Math.max(1, Math.min(500, parseInt(e.target.value) || 1)))}
+                onChange={e => {
+                  const v = e.target.value;
+                  setChunkSize(v === '' ? '' : Math.max(1, Math.min(500, parseInt(v) || 1)));
+                }}
                 style={{
                   width: '100%', padding: '10px 12px', boxSizing: 'border-box',
                   background: 'rgba(0,255,65,0.05)',

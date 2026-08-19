@@ -6,7 +6,7 @@ from typing import Any, Deque, Dict, Optional, Union
 from pydantic import IPvAnyAddress
 
 from app.schemas.event import AiPrediction, EnrichedEvent
-from app.services.persistence import persist_ai_result, persist_ingested_event
+from app.services.persistence import persist_ai_result, persist_ai_results_batch, persist_ingested_event
 
 MAX_HISTORY = 200
 _store: Deque[Dict[str, Any]] = deque(maxlen=MAX_HISTORY)
@@ -54,6 +54,27 @@ def attach_prediction(event_id: str, prediction: AiPrediction) -> None:
                 break
 
     persist_ai_result(event_id, prediction)
+
+
+def attach_predictions_batch(pairs: list[tuple[str, AiPrediction]]) -> None:
+    """Attach many predictions at once: one in-memory pass + one batched DB write."""
+    if not pairs:
+        return
+
+    with _lock:
+        index = {record["event"].event_id: record for record in _store}
+        for event_id, prediction in pairs:
+            record = index.get(event_id)
+            if record is None:
+                continue
+            record["prediction"] = prediction
+            record["received_at"] = datetime.utcnow()
+            pipeline_id = record.get("pipeline_id")
+            if pipeline_id and pipeline_id in _pipelines:
+                pipeline = _pipelines[pipeline_id]
+                pipeline["predicted_events"] = pipeline.get("predicted_events", 0) + 1
+
+    persist_ai_results_batch(pairs)
 
 
 def initialize_pipeline(pipeline_id: str, total_events: int, total_chunks: int) -> None:
