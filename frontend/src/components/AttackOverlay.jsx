@@ -411,56 +411,7 @@ const AttackOverlay = ({
             </h2>
           </div>
 
-          {((activeAttackCount >= 1 && activeAttacks.length >= 1) || activeAttackCount > 1 || detailAttack) && (
-            <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', margin: '20px 0 20px 0', overflowX: 'auto', paddingBottom: '10px' }}>
-              {detailAttack ? (
-                <button
-                  style={{
-                    padding: '12px 18px',
-                    color: '#000',
-                    background: '#00ff41',
-                    border: '1px solid #00ff41',
-                    cursor: 'default', fontWeight: 'bold', letterSpacing: '1px', whiteSpace: 'nowrap'
-                  }}
-                >
-                  {`VECTOR_${detailAttack.id ? String(detailAttack.id).slice(-2) : '01'} ${String(detailAttack.type || '').substring(0, 8)}`}
-                </button>
-              ) : (
-                <>
-                  {activeTestAttack && (
-                    <button
-                      onClick={() => onDetailView?.(activeTestAttack)}
-                      style={{
-                        padding: '12px 18px',
-                        color: activeTestAttack.id === attackToShow.id ? '#000' : '#fff',
-                        background: activeTestAttack.id === attackToShow.id ? '#00ff41' : 'rgba(255,255,255,0.08)',
-                        border: activeTestAttack.id === attackToShow.id ? '1px solid #00ff41' : '1px solid rgba(255,255,255,0.12)',
-                        cursor: 'pointer', fontWeight: 'bold', letterSpacing: '1px', whiteSpace: 'nowrap'
-                      }}
-                    >
-                      VECTOR_01 {String(activeTestAttack.type || '').substring(0, 8)}
-                    </button>
-                  )}
-                  {activeAttacks.map((attack, idx) => (
-                    <button
-                      key={attack.id}
-                      onClick={() => onDetailView?.(attack)}
-                      style={{
-                        padding: '12px 18px',
-                        color: attack.id === attackToShow.id ? '#000' : '#fff',
-                        background: attack.id === attackToShow.id ? '#00ff41' : 'rgba(255,255,255,0.08)',
-                        border: attack.id === attackToShow.id ? '1px solid #00ff41' : '1px solid rgba(255,255,255,0.12)',
-                        cursor: 'pointer', fontWeight: 'bold', letterSpacing: '1px', whiteSpace: 'nowrap'
-                      }}
-                    >
-                      VECTOR_{String(idx + 2).padStart(2, '0')} {String(attack.type || '').substring(0, 8)}
-                    </button>
-                  ))}
-                </>
-              )}
-              {/* Removed per-attack MULTI DASHBOARD button — Multi dashboard is accessible from Live Threats screen */}
-            </div>
-          )}
+
 
           <div className="split-layout" style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '30px', maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
             <div className="map-panel" style={{ border: '1px solid #ff0000', boxShadow: '0 0 15px rgba(255,0,0,0.2)' }}>

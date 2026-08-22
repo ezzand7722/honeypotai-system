@@ -1053,43 +1053,13 @@ function App() {
               display: 'flex',
               zIndex: 100005, pointerEvents: 'all', position: 'fixed', bottom: '40px', right: '40px', gap: '15px', flexDirection: 'column', alignItems: 'flex-end'
             }}>
-
-              {showLoopbackMenu && (
-                <div className="loopback-selector-popup">
-                  <div className="popup-tag">// SELECT_INTERNAL_VECTOR</div>
-                  <button onClick={() => { isAttacked ? addLoopbackVector('BRUTE') : startLoopbackAttack('BRUTE'); setShowLoopbackMenu(false); }}>01_BRUTE_FORCE</button>
-                  <button onClick={() => { isAttacked ? addLoopbackVector('DDOS') : startLoopbackAttack('DDOS'); setShowLoopbackMenu(false); }}>02_DDoS_FLOOD</button>
-                  <button className="cancel-btn" onClick={() => setShowLoopbackMenu(false)}>CLOSE</button>
-                </div>
-              )}
-
-              <button onClick={isAttacked ? addNewVector : toggleAttack} className="control-btn-pro">
-                {isAttacked ? "ADD_NEW_VECTOR" : "EXTERNAL_TEST"}
-              </button>
-
-              <button
-                onClick={() => setShowLoopbackMenu(!showLoopbackMenu)}
-                disabled={false}
-                className={`control-btn-pro loopback-btn ${showLoopbackMenu ? 'active' : ''}`}
-              >
-                LOOPBACK_MODE
-              </button>
-
-              <button onClick={isAttacked ? addDoubleVector : startDoubleAttack} className="control-btn-pro dual-btn" style={{ opacity: 1 }}>
-                {isAttacked ? "ADD_DUAL_VECTOR" : "DUAL_ATTACK"}
-              </button>
-
-              <button onClick={isAttacked ? addMultiVector : startMultiAttack} className="control-btn-pro multi-btn" style={{ opacity: 1 }}>
-                {isAttacked ? "ADD_MULTI_VECTOR" : "MULTI_ATTACK"}
-              </button>
-
-              {!isAttacked && (
+              {isAttacked && (
                 <button
-                  onClick={() => setShowLogUpload(true)}
+                  onClick={finalizeAttackAndSave}
                   className="control-btn-pro"
-                  style={{ borderColor: '#00aaff !important', color: '#00aaff', background: 'transparent', border: '1px solid #00aaff' }}
+                  style={{ background: '#ff0000', borderColor: '#ff0000', color: '#ffffff', boxShadow: '0 0 20px rgba(255,0,0,0.8)', width: '220px', fontWeight: '900' }}
                 >
-                  IMPORT_LOGS
+                  🛑 END ATTACK NOW
                 </button>
               )}
             </div>

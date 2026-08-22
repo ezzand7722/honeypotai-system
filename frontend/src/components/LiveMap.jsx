@@ -123,8 +123,11 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
       controls.autoRotate = !isAttacked; 
       controls.autoRotateSpeed = 0.5;
       if (isAttacked && (attackerData || attackerCoords)) {
-        const targetLat = attackerData?.coords?.lat || attackerCoords?.lat || 55.7558;
-        const targetLng = attackerData?.coords?.lng || attackerCoords?.lng || 37.6173;
+        const lat = Number(attackerData?.coords?.lat ?? attackerCoords?.lat);
+        const lng = Number(attackerData?.coords?.lng ?? attackerCoords?.lng);
+        const isValidAttacker = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+        const targetLat = isValidAttacker ? lat : 31.9454;
+        const targetLng = isValidAttacker ? lng : 35.9284;
         const focusKey = `${targetLat}_${targetLng}_${attackerData?.id || ''}`;
         
         if (lastFocusedKeyRef.current !== focusKey) {
@@ -141,30 +144,71 @@ export default function LiveMap({ isAttacked, attackerData, attackerCoords, targ
   const currentAttacker = useMemo(() => {
     if (!isAttacked || hideAttacker) return null;
     const data = attackerData;
-    if (data && !data.coords) {
-      data.coords = { lat: 0, lng: 0 };
+    if (!data) return null;
+    const lat = Number(data.coords?.lat ?? attackerCoords?.lat);
+    const lng = Number(data.coords?.lng ?? attackerCoords?.lng);
+    // Discard invalid or (0,0) middle-of-nowhere coordinates
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) {
+      return null;
     }
-    if (data && !data.loc) {
-      data.loc = data.city || 'Unknown, Unknown';
-    }
-    return data;
+    return {
+      ...data,
+      coords: { lat, lng },
+      loc: data.loc || data.city || 'Unknown Location',
+    };
   }, [isAttacked, hideAttacker, attackerData, attackerCoords]);
 
   const currentTarget = useMemo(() => targetCoords || { lat: 31.9454, lng: 35.9284 }, [targetCoords]);
 
-  // --- التعديل هنا لترتيب الظهور ---
+  // --- Nodes: only valid nodes, never (0,0) ---
   const nodes = useMemo(() => [
-    // 1. نضع المهاجم أولاً في المصفوفة ليكون في المقدمة (Z-index أعلى برمجياً في الـ WebGL)
-    ...(currentAttacker ? [{ id: 'attacker', lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, label: 'ATTACK_SOURCE', country: (currentAttacker.loc || '').split(',')[1] || 'MISSING', city: (currentAttacker.loc || '').split(',')[0] || 'MISSING', status: 'Threat', color: '#ff0000', ip: currentAttacker.ip, node_id: currentAttacker.id }] : []),
-    // 2. نضع العقد الثابتة بعد ذلك
-    { id: 'CAMERA-1', lat: 31.9454, lng: 35.9284, label: 'DAHUA(IPC-HFW1431S)', country: 'Jordan', city: 'Amman', status: 'Active', node_id: 'IPC-HFW1431', ip: 'Sensor', color: '#00ff41' }
-  ], [currentAttacker]);
+    ...(currentAttacker && (currentAttacker.coords.lat !== currentTarget.lat || currentAttacker.coords.lng !== currentTarget.lng)
+      ? [{
+          id: 'attacker',
+          lat: currentAttacker.coords.lat,
+          lng: currentAttacker.coords.lng,
+          label: 'ATTACK_SOURCE',
+          country: (currentAttacker.loc || '').split(',')[1]?.trim() || currentAttacker.country || 'Unknown',
+          city: (currentAttacker.loc || '').split(',')[0]?.trim() || currentAttacker.city || 'Unknown',
+          status: 'Threat',
+          color: '#ff0000',
+          ip: currentAttacker.ip || currentAttacker.src_ip || 'Attacker',
+          node_id: currentAttacker.id || 'ATTACKER'
+        }]
+      : []),
+    {
+      id: 'CAMERA-1',
+      lat: 31.9454,
+      lng: 35.9284,
+      label: 'DAHUA(IPC-HFW1431S)',
+      country: 'Jordan',
+      city: 'Amman',
+      status: isAttacked ? 'Under Attack' : 'Active',
+      node_id: 'IPC-HFW1431',
+      ip: 'Sensor (10.0.0.105)',
+      color: isAttacked ? '#ff0000' : '#00ff41'
+    }
+  ], [currentAttacker, currentTarget, isAttacked]);
 
   const ringsData = useMemo(() => [
-    { lat: 31.9454, lng: 35.9284, color: '#00ff41' },
-    ...(currentAttacker ? [{ lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, color: '#ff0000' }] : []),
-    ...(isAttacked ? [{ lat: currentTarget.lat, lng: currentTarget.lng, color: '#ff0000' }] : [])
-  ], [currentAttacker, currentTarget, isAttacked]);
+    { lat: 31.9454, lng: 35.9284, color: isAttacked ? '#ff0000' : '#00ff41' },
+    ...(currentAttacker && (currentAttacker.coords.lat !== 31.9454 || currentAttacker.coords.lng !== 35.9284)
+      ? [{ lat: currentAttacker.coords.lat, lng: currentAttacker.coords.lng, color: '#ff0000' }]
+      : [])
+  ], [currentAttacker, isAttacked]);
+
+  const arcsData = useMemo(() => {
+    if (!currentAttacker || (currentAttacker.coords.lat === currentTarget.lat && currentAttacker.coords.lng === currentTarget.lng)) {
+      return [];
+    }
+    return [{
+      startLat: currentAttacker.coords.lat,
+      startLng: currentAttacker.coords.lng,
+      endLat: currentTarget.lat,
+      endLng: currentTarget.lng,
+      color: '#ff0000'
+    }];
+  }, [currentAttacker, currentTarget]);
 
   return (
     <div className="globe-container" style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000', overflow: 'hidden' }}>

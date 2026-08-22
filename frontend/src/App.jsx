@@ -12,8 +12,9 @@ import Header from './components/Header';
 import ConfigModal from './components/ConfigModal';
 import LiveThreatsModule from './components/LiveThreatsModule';
 import RawAIModule from './components/RawAIModule';
+import AttackNotification from './components/AttackNotification';
 import { createTestAttack, createDoubleAttackVectors, createLoopbackAttack } from './components/attackEngine';
-import { sfx } from './logic/SFXEngine';
+import { sfx, playBeepBeep, playDangerVoice, playAttackAlertSound } from './logic/SFXEngine';
 import { getActiveAttackCount, getCombinedActiveAttacks, splitPrimaryAndSecondaryAttacks } from './logic/attackState';
 
 import './App.css';
@@ -156,6 +157,7 @@ function App() {
   const [alarmPlayedForSession, setAlarmPlayedForSession] = useState(false); // لضمان تشغيل الإنذار مرة واحدة فقط
   const isSpeaking = useRef(false); // لمنع تشغيل وظيفتي نطق في نفس الوقت
   const alertShownForAttackIds = useRef(new Set()); // تتبع الهجمات التي تم عرض الإنذار لها
+  const [attackNotification, setAttackNotification] = useState(null); // popup toast for new attacks
 
   const isFinalizing = useRef(false);
   const attackRef = useRef(false);
@@ -191,7 +193,7 @@ function App() {
 
   const playFemaleAlert = useCallback(() => {
     // Ø¥Ø°Ø§ ÙƒØ§Ù† Ù‡Ù†Ø§Ùƒ Ù†Ø·Ù‚ Ø¬Ø§Ø±Ù  Ø£Ùˆ Ø§Ù„ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ù…ÙƒØªÙˆÙ…Ø©ØŒ Ø§Ø®Ø±Ø¬ Ù ÙˆØ±Ø§Ù‹
-    if (isSpeaking.current || alertSuppressed || !showOverlay) return;
+    if (isSpeaking.current || alertSuppressed || (!showOverlay && !attackNotification)) return;
 
     const currentAttack = lastAttackForAlert;
 
@@ -232,7 +234,7 @@ function App() {
     };
 
     window.speechSynthesis.speak(alertMsg);
-  }, [lastAttackForAlert, alertSuppressed, showOverlay]);
+  }, [lastAttackForAlert, alertSuppressed, showOverlay, attackNotification]);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
@@ -391,13 +393,14 @@ function App() {
               src_ip: alert.src_ip || 'Missing',
               port: alert.dest_port || 0,
               proto: alert.protocol || 'TCP',
-              loc: alert.details?.event?.metadata?.location || alert.location || 'MISSING',
-              city: (alert.details?.event?.metadata?.location || alert.location || 'MISSING').split(',')[0] || 'MISSING',
-              country: (alert.details?.event?.metadata?.location || alert.location || 'MISSING').split(',')[1]?.trim() || 'MISSING',
+              location: alert.details?.event?.metadata?.location || alert.location || 'Amman, Jordan',
+              loc: alert.details?.event?.metadata?.location || alert.location || 'Amman, Jordan',
+              city: (alert.details?.event?.metadata?.location || alert.location || 'Amman, Jordan').split(',')[0] || 'Amman',
+              country: (alert.details?.event?.metadata?.location || alert.location || 'Amman, Jordan').split(',')[1]?.trim() || 'Jordan',
               threat: severityStr,
               severity: severityStr,
               severityScore: { 'EXTREME': 100, 'HIGH': 80, 'MEDIUM': 55, 'LOW': 30, 'MISSING': 10 }[severityStr] || 50,
-              coords: { lat: alert.latitude || 0, lng: alert.longitude || 0 },
+              coords: (alert.latitude && alert.longitude) ? { lat: alert.latitude, lng: alert.longitude } : null,
               status: 'DETECTED',
               packetSize: '1500 MTU',
               isp: 'Missing',
@@ -451,7 +454,7 @@ function App() {
                 setIsAttacked(true);
                 setAlarmPlayedForSession(false);
               }
-              // The user hates the forced popup, so we don't call setShowOverlay(true) here anymore.
+              setAttackNotification(mappedAttack);
             }
 
             // Basic /report/alerts cards are demos only. Real metrics come from
@@ -598,6 +601,12 @@ function App() {
             if (ip && byIp.has(ip)) return null;
             return curr;
           });
+
+          const unseen = nextList.find(a => !alertShownForAttackIds.current.has(a.id || a.attack_context_id || a.ip));
+          if (unseen) {
+            alertShownForAttackIds.current.add(unseen.id || unseen.attack_context_id || unseen.ip);
+            setAttackNotification(unseen);
+          }
         }
       } catch (e) {
         console.warn('[attack-context] fetch error:', e);
@@ -670,8 +679,8 @@ function App() {
   useEffect(() => {
     attackRef.current = isAttacked;
 
-    if (isAttacked && showOverlay && !alertSuppressed && !alarmPlayedForSession) {
-      // ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ø§Ù„ØµÙˆØªÙŠ (Siren) Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© ÙÙ‚Ø· Ø¹Ù†Ø¯ Ø¨Ø¯Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø©
+    if (isAttacked && (showOverlay || attackNotification) && !alertSuppressed && !alarmPlayedForSession) {
+      // ØªØ´ØºÙŠÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ø§Ù„ØµÙˆØªÙŠ (Siren) Ù…Ø±Ø© ÙˆØ§Ø­Ø¯Ø© Ù Ù‚Ø· Ø¹Ù†Ø¯ Ø¨Ø¯Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø©
       if (sirenAudio.current && sirenAudio.current.paused) {
         sirenAudio.current.loop = true;
         sirenAudio.current.play().catch(() => { });
@@ -681,7 +690,7 @@ function App() {
       // ÙˆØ¶Ø¹ Ø¹Ù„Ø§Ù…Ø© Ø¹Ù„Ù‰ Ø£Ù† Ø§Ù„Ø¥Ù†Ø°Ø§Ø± ØªÙ… ØªØ´ØºÙŠÙ„Ù‡
       setAlarmPlayedForSession(true);
     } else if (!isAttacked) {
-      // Ø¥ÙŠÙ‚Ø§Ù ÙƒÙ„ Ø´ÙŠØ¡ Ø¹Ù†Ø¯ Ø§Ù†ØªÙ‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬ÙˆÙ… Ø£Ùˆ ÙƒØªÙ… Ø§Ù„ØµÙˆØª
+      // Ø¥ÙŠÙ‚Ø§Ù  ÙƒÙ„ Ø´ÙŠØ¡ Ø¹Ù†Ø¯ Ø§Ù†ØªÙ‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬ÙˆÙ… Ø£Ùˆ ÙƒØªÙ… Ø§Ù„ØµÙˆØª
       window.speechSynthesis.cancel();
       isSpeaking.current = false;
       if (sirenAudio.current) {
@@ -689,7 +698,7 @@ function App() {
         sirenAudio.current.currentTime = 0;
       }
     }
-  }, [isAttacked, showOverlay, alertSuppressed, playFemaleAlert, alarmPlayedForSession]);
+  }, [isAttacked, showOverlay, attackNotification, alertSuppressed, playFemaleAlert, alarmPlayedForSession]);
 
   const muteAlerts = () => {
     if (sirenAudio.current) {
@@ -769,6 +778,7 @@ function App() {
 
       setIsAttacked(false);
       setShowOverlay(false);
+      setAttackNotification(null);
       setActiveTestAttack(null);
       setActiveAttacksWrapper([]);
       setLastAttackForAlert(null);
@@ -923,7 +933,7 @@ function App() {
           return (now - attackStartTime) < attackDuration;
         });
 
-        // Ø¥Ø°Ø§ ØªÙ… Ø­Ø°Ù Ù‡Ø¬Ù…Ø§ØªØŒ Ø­Ø¯Ù‘Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© Ù…ØªØ¨Ù‚ÙŠØ©
+        // Ø¥Ø°Ø§ ØªÙ… Ø­Ø°Ù  Ù‡Ø¬Ù…Ø§ØªØŒ Ø­Ø¯Ù‘Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø¢Ø®Ø± Ù‡Ø¬Ù…Ø© Ù…ØªØ¨Ù‚ÙŠØ©
         if (remaining.length < prev.length && remaining.length > 0) {
           setLastAttackForAlert(remaining[remaining.length - 1]);
         }
@@ -949,6 +959,7 @@ function App() {
       setActiveTestAttack(newAttack);
       setSelectedAttackForDetail(newAttack);
       setLastAttackForAlert(newAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
+      setAttackNotification(newAttack);
       setActiveAttacksWrapper([]);
       setDoubleAttackMode(false);
       setShowMultiAttackDetail(false);
@@ -963,16 +974,17 @@ function App() {
     }
   };
 
-  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© Ù‡Ø¬Ù…Ø© Ø¬Ø¯ÙŠØ¯Ø© Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
+  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§Ù Ø© Ù‡Ø¬Ù…Ø© Ø¬Ø¯ÙŠØ¯Ø© Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
   const addNewVector = () => {
     if (!isAttacked || settings.shieldActive) return;
     const newAttack = { ...createTestAttack(), startTime: Date.now(), duration: 45000, progress: 0 };
     setActiveAttacksWrapper(prev => [...prev, newAttack]);
     setLastAttackForAlert(newAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setAttackNotification(newAttack);
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`ðŸ”´ NEW_ATTACK_VECTOR_DETECTED: ${newAttack.type}`);
-    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - Ù Ù‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
   };
 
   const normalizeMultiAttackCount = (value) => {
@@ -995,6 +1007,7 @@ function App() {
     setActiveTestAttack(attackA);
     setActiveAttacksWrapper([attackB]);
     setLastAttackForAlert(attackA); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰
+    setAttackNotification(attackA);
     setDoubleAttackMode(true);
     setIsAttacked(true);
     setShowOverlay(true);
@@ -1006,7 +1019,7 @@ function App() {
     setLiveLog("ðŸ”´ DUAL_VECTOR_ATTACK_INITIATED!");
   };
 
-  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© double attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
+  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§Ù Ø© double attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
   const addDoubleVector = () => {
     if (!isAttacked || settings.shieldActive) return;
     const [attack1, attack2] = createDoubleAttackVectors();
@@ -1023,10 +1036,11 @@ function App() {
       return next.filter((attack, index, arr) => attack && arr.findIndex(item => item?.id === attack.id) === index);
     });
     setLastAttackForAlert(attack1); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setAttackNotification(secondaryAttack);
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`ðŸ”´ DUAL_VECTOR_ATTACK_ADDED: ${attack1.type} + ${attack2.type}`);
-    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - Ù Ù‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
   };
 
   const startMultiAttack = (countOverride) => {
@@ -1051,10 +1065,11 @@ function App() {
     isFinalizing.current = false;
     setCurrentScreen('main');
     setLastAttackForAlert(primaryAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰
+    setAttackNotification(primaryAttack);
     setLiveLog(`ðŸ”´ MULTI_ATTACKS_INITIATED x${count}`);
   };
 
-  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§ÙØ© multi attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
+  // Ø¯Ø§Ù„Ø© Ø¬Ø¯ÙŠØ¯Ø©: Ø¥Ø¶Ø§Ù Ø© multi attack Ø¬Ø¯ÙŠØ¯ Ø¨Ø¯ÙˆÙ† Ø¥Ù†Ù‡Ø§Ø¡ Ø§Ù„Ù‡Ø¬Ù…Ø§Øª Ø§Ù„Ø­Ø§Ù„ÙŠØ©
   const addMultiVector = (countOverride) => {
     if (!isAttacked || settings.shieldActive) return;
     const count = normalizeMultiAttackCount(countOverride ?? multiAttackCount);
@@ -1073,10 +1088,11 @@ function App() {
       setActiveAttacksWrapper(prev => [...prev, ...newAttacks]);
     }
     setLastAttackForAlert(primaryAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
+    setAttackNotification(primaryAttack);
     setShowOverlay(true);
     setCurrentScreen('main');
     setLiveLog(`ðŸ”´ NEW_ATTACKS_ADDED x${count}`);
-    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - ÙÙ‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
+    // Ù„Ø§ Ù†Ø´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù‡Ù†Ø§ - Ù Ù‚Ø· Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø£ÙˆÙ„Ù‰ ØªØ´ØºÙ„ Ø§Ù„Ø¥Ù†Ø°Ø§Ø±
   };
 
   const startLoopbackAttack = (type) => {
@@ -1084,6 +1100,7 @@ function App() {
     const lbAttack = { ...createLoopbackAttack(type), startTime: Date.now(), duration: 45000, progress: 0 };
     setActiveTestAttack(lbAttack);
     setSelectedAttackForDetail(lbAttack);
+    setAttackNotification(lbAttack);
     setLastAttackForAlert(lbAttack); // Ø­Ø¯Ø« Ø§Ù„Ø¥Ù†Ø°Ø§Ø± Ù„ÙŠÙ‚Ø±Ø£ Ø§Ù„Ù‡Ø¬Ù…Ø© Ø§Ù„Ø¬Ø¯ÙŠØ¯Ø©
     setActiveAttacks([]);
     setDoubleAttackMode(false);
@@ -1109,6 +1126,7 @@ function App() {
     } else {
       setActiveAttacksWrapper(prev => [...prev, lbAttack]);
     }
+    setAttackNotification(lbAttack);
     setLastAttackForAlert(lbAttack); // ØªØ­Ø¯ÙŠØ« Ø§Ù„Ù‡Ø¬Ù…Ø© Ù„Ù„Ø¹Ø±Ø¶ Ù„ÙƒÙ† Ø¨Ø¯ÙˆÙ† ØªØ´ØºÙŠÙ„ Ø¥Ù†Ø°Ø§Ø± Ø¬Ø¯ÙŠØ¯
     setShowOverlay(true);
     setCurrentScreen('main');
@@ -1325,7 +1343,10 @@ function App() {
           {activeModule === 'history' && (
             <div className="sub-screen-overlay" style={{ zIndex: 10015, pointerEvents: 'all', background: '#020b02' }}>
               <button className="close-btn-lg" type="button" aria-label="Close" title="Close" onClick={() => setActiveModule(null)}>✕</button>
-              <HistoryModule historyList={historyList} onClearHistory={() => { historyList.forEach(a => discardedAlertIds.current.add(a.id)); setHistoryList([]); }} />
+              <HistoryModule 
+                historyList={historyList} 
+                onClearHistory={() => { historyList.forEach(a => discardedAlertIds.current.add(a.id)); setHistoryList([]); }} 
+              />
             </div>
           )}
 
@@ -1365,80 +1386,6 @@ function App() {
                   🛑 END ATTACK NOW
                 </button>
               )}
-
-              {showLoopbackMenu && (
-                <div className="loopback-selector-popup">
-                  <div className="popup-tag">// SELECT_ATTACK_VECTOR</div>
-                  <button onClick={() => { setShowLoopbackSubMenu(false); setShowMultiCountInput(false); setShowLoopbackMenu(false); if (isAttacked) { addNewVector(); } else { toggleAttack(); } }}>EXTERNAL_TEST</button>
-                  <button onClick={() => { setShowLoopbackSubMenu(false); setShowMultiCountInput(false); setShowLoopbackMenu(false); if (isAttacked) { addDoubleVector(); } else { startDoubleAttack(); } }}>DUAL_ATTACK</button>
-
-                  <button
-                    onClick={() => {
-                      setShowLoopbackSubMenu(prev => !prev);
-                      setShowMultiCountInput(false);
-                    }}
-                    className="menu-group-btn"
-                  >
-                    LOOPBACK_MODE
-                  </button>
-                  {showLoopbackSubMenu && (
-                    <div className="attack-submenu">
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addLoopbackVector('BRUTE'); } else { startLoopbackAttack('BRUTE'); } }}>01_BRUTE_FORCE</button>
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addLoopbackVector('DDOS'); } else { startLoopbackAttack('DDOS'); } }}>02_DDoS_FLOOD</button>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      setShowMultiCountInput(prev => !prev);
-                      setShowLoopbackSubMenu(false);
-                    }}
-                    className="menu-group-btn"
-                  >
-                    MULTI_ATTACK
-                  </button>
-                  {showMultiCountInput && (
-                    <div className="attack-submenu">
-                      <label className="submenu-label" htmlFor="multi-count">COUNT (1-10)</label>
-                      <input
-                        id="multi-count"
-                        className="attack-count-input"
-                        type="number"
-                        min="1"
-                        max="10"
-                        value={multiAttackCount}
-                        onChange={(e) => setMultiAttackCount(e.target.value)}
-                      />
-                      <button onClick={() => { setShowLoopbackMenu(false); if (isAttacked) { addMultiVector(multiAttackCount); } else { startMultiAttack(multiAttackCount); } }}>
-                        APPLY_MULTI
-                      </button>
-                    </div>
-                  )}
-
-                  <button className="cancel-btn" onClick={() => { setShowLoopbackMenu(false); setShowLoopbackSubMenu(false); setShowMultiCountInput(false); }}>CLOSE</button>
-                </div>
-              )}
-
-              <button
-                onClick={() => {
-                  setShowLoopbackMenu(prev => !prev);
-                  setShowLoopbackSubMenu(false);
-                  setShowMultiCountInput(false);
-                }}
-                className={`control-btn-pro loopback-btn ${showLoopbackMenu ? 'active' : ''}`}
-              >
-                ATTACK_TEST
-              </button>
-
-              {!isAttacked && (
-                <button
-                  onClick={() => setShowLogUpload(true)}
-                  className="control-btn-pro"
-                  style={{ borderColor: '#00aaff !important', color: '#00aaff', background: 'transparent', border: '1px solid #00aaff' }}
-                >
-                  IMPORT_LOGS
-                </button>
-              )}
             </div>
           )}
 
@@ -1449,6 +1396,13 @@ function App() {
                 setShowLogUpload(false);
                 setLiveLog(`LOG_IMPORT_QUEUED: ${data.pipeline_id?.substring(0, 8)}... | AWAITING_AI_ANALYSIS`);
               }}
+            />
+          )}
+
+          {attackNotification && (
+            <AttackNotification
+              attack={attackNotification}
+              onClose={() => setAttackNotification(null)}
             />
           )}
 
