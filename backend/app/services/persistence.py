@@ -248,9 +248,12 @@ def initialize_database() -> None:
                         latitude DOUBLE PRECISION,
                         longitude DOUBLE PRECISION,
                         destination_port INT,
-                        archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                        UNIQUE(attack_id, ended_time)
+                        archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                """)
+                cur.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_attack_history_attack_id
+                        ON public.attack_history (attack_id)
                 """)
             conn.commit()
         finally:
@@ -358,9 +361,12 @@ def initialize_database() -> None:
                     latitude REAL,
                     longitude REAL,
                     destination_port INTEGER,
-                    archived_at TEXT NOT NULL,
-                    UNIQUE(attack_id, ended_time)
+                    archived_at TEXT NOT NULL
                 )
+            """)
+            conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_attack_history_attack_id
+                    ON attack_history (attack_id)
             """)
             conn.commit()
         finally:
@@ -461,7 +467,7 @@ def upsert_attack_context(ai_output: dict) -> None:
         finally:
             _release_conn(conn)
         if attack_status == "ended":
-            archive_ended_attack(attack_id)
+            archive_ended_attack(attack_id, payload=ai_output)
         return
 
     # SQLite fallback
@@ -507,7 +513,7 @@ def upsert_attack_context(ai_output: dict) -> None:
             _release_conn(conn)
 
     if attack_status == "ended":
-        archive_ended_attack(attack_id)
+        archive_ended_attack(attack_id, payload=ai_output)
 
 
 def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
@@ -563,14 +569,86 @@ def load_recent_attack_contexts(limit: int = 50) -> list[dict]:
     return results
 
 
-def archive_ended_attack(attack_id: str) -> None:
+def archive_ended_attack(attack_id: str, payload: Optional[dict] = None) -> None:
     """Copy an ended attack_context row into the append-only attack_history table.
 
-    Idempotent (UNIQUE on (attack_id, ended_time)) and never truncated by the
-    reset loop, so the frontend History tab can show past attacks forever.
+    Captures the full state of the attack (commands, connection counts, passwords).
+    Guaranteed idempotent by unique constraint on attack_id.
     """
     if not attack_id:
         return
+
+    # 1. Resolve full data either from passed payload or from database/live context
+    ctx = payload.copy() if payload else None
+    if not ctx:
+        if _use_postgres():
+            conn = _connect_postgres()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                               connection_count, failed_count, success_count,
+                               unique_passwords, command_count, suspicious_cmds, commands,
+                               start_time, last_seen_time, ended_time, renewed_count,
+                               location, latitude, longitude, destination_port
+                        FROM public.attack_context
+                        WHERE attack_id = %s
+                    """, (attack_id,))
+                    if cur.description:
+                        cols = [d[0] for d in cur.description]
+                        row = cur.fetchone()
+                        if row:
+                            ctx = dict(zip(cols, row))
+            except Exception as e:
+                log.error("Error reading attack_context for archive %s: %s", attack_id, e)
+            finally:
+                _release_conn(conn)
+        else:
+            with _lock:
+                conn = _connect()
+                try:
+                    cursor = conn.execute("SELECT * FROM attack_context WHERE attack_id = ?", (attack_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        ctx = dict(row)
+                except Exception as e:
+                    log.error("Error reading attack_context (SQLite) for archive %s: %s", attack_id, e)
+                finally:
+                    _release_conn(conn)
+
+    if not ctx:
+        log.warning("archive_ended_attack: No attack_context found for %s to archive (or already archived)", attack_id)
+        return
+
+    src_ip = ctx.get("src_ip", "")
+    attack_type = ctx.get("attack_type")
+    attack_status = "ended"
+    severity = ctx.get("severity")
+    connection_count = int(ctx.get("connection_count", 0))
+    failed_count = int(ctx.get("failed_count", 0))
+    success_count = int(ctx.get("success_count", 0))
+    unique_passwords = int(ctx.get("unique_passwords", 0))
+    command_count = int(ctx.get("command_count", 0))
+    suspicious_cmds = int(ctx.get("suspicious_commands", ctx.get("suspicious_cmds", 0)))
+    raw_cmds = ctx.get("commands") or ctx.get("attacker_commands") or []
+    if isinstance(raw_cmds, str):
+        try:
+            commands = json.loads(raw_cmds)
+        except Exception:
+            commands = []
+    elif isinstance(raw_cmds, list):
+        commands = raw_cmds
+    else:
+        commands = []
+    
+    start_time = ctx.get("start_time")
+    last_seen_time = ctx.get("last_seen_time")
+    ended_time = ctx.get("ended_time") or _utc_now()
+    renewed_count = int(ctx.get("renewed_count", 0))
+    location = ctx.get("location")
+    latitude = ctx.get("latitude")
+    longitude = ctx.get("longitude")
+    destination_port = ctx.get("destination_port") or ctx.get("dst_port")
 
     if _use_postgres():
         conn = _connect_postgres()
@@ -582,19 +660,50 @@ def archive_ended_attack(attack_id: str) -> None:
                         connection_count, failed_count, success_count,
                         unique_passwords, command_count, suspicious_cmds, commands,
                         start_time, last_seen_time, ended_time, renewed_count,
-                        location, latitude, longitude, destination_port
+                        location, latitude, longitude, destination_port, archived_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s, %s::jsonb,
+                        COALESCE(%s::timestamp, NOW()), COALESCE(%s::timestamp, NOW()), COALESCE(%s::timestamp, NOW()), %s,
+                        %s, %s, %s, %s, NOW()
                     )
-                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
-                           connection_count, failed_count, success_count,
-                           unique_passwords, command_count, suspicious_cmds, commands,
-                           start_time, last_seen_time, ended_time, renewed_count,
-                           location, latitude, longitude, destination_port
-                    FROM public.attack_context
-                    WHERE attack_id = %s AND attack_status = 'ended'
-                    ON CONFLICT (attack_id, ended_time) DO NOTHING
-                """, (attack_id,))
-            conn.commit()
-            log.info("Archived ended attack %s to attack_history", attack_id)
+                    ON CONFLICT (attack_id) DO UPDATE SET
+                        src_ip            = COALESCE(NULLIF(EXCLUDED.src_ip, ''), public.attack_history.src_ip),
+                        attack_type       = COALESCE(NULLIF(EXCLUDED.attack_type, 'Unknown'), public.attack_history.attack_type),
+                        attack_status     = 'ended',
+                        severity          = COALESCE(EXCLUDED.severity, public.attack_history.severity),
+                        connection_count  = GREATEST(public.attack_history.connection_count, EXCLUDED.connection_count),
+                        failed_count      = GREATEST(public.attack_history.failed_count, EXCLUDED.failed_count),
+                        success_count     = GREATEST(public.attack_history.success_count, EXCLUDED.success_count),
+                        unique_passwords  = GREATEST(public.attack_history.unique_passwords, EXCLUDED.unique_passwords),
+                        command_count     = GREATEST(public.attack_history.command_count, EXCLUDED.command_count),
+                        suspicious_cmds   = GREATEST(public.attack_history.suspicious_cmds, EXCLUDED.suspicious_cmds),
+                        commands          = CASE 
+                                              WHEN EXCLUDED.commands IS NOT NULL AND jsonb_array_length(EXCLUDED.commands) > 0 THEN EXCLUDED.commands 
+                                              ELSE public.attack_history.commands 
+                                            END,
+                        start_time        = COALESCE(public.attack_history.start_time, EXCLUDED.start_time),
+                        last_seen_time    = COALESCE(EXCLUDED.last_seen_time, public.attack_history.last_seen_time),
+                        ended_time        = COALESCE(EXCLUDED.ended_time, NOW()),
+                        renewed_count     = GREATEST(public.attack_history.renewed_count, EXCLUDED.renewed_count),
+                        location          = COALESCE(EXCLUDED.location, public.attack_history.location),
+                        latitude          = COALESCE(EXCLUDED.latitude, public.attack_history.latitude),
+                        longitude         = COALESCE(EXCLUDED.longitude, public.attack_history.longitude),
+                        destination_port  = COALESCE(EXCLUDED.destination_port, public.attack_history.destination_port),
+                        archived_at       = NOW()
+                """, (
+                    attack_id, src_ip, attack_type, attack_status, severity,
+                    connection_count, failed_count, success_count,
+                    unique_passwords, command_count, suspicious_cmds, _json(commands),
+                    start_time, last_seen_time, ended_time, renewed_count,
+                    location, latitude, longitude, destination_port,
+                ))
+                conn.commit()
+                log.info(
+                    "Archived ended attack %s to attack_history (rowcount=%d, commands=%d, connections=%d)",
+                    attack_id, cur.rowcount, len(commands), connection_count
+                )
         except Exception as e:
             log.error("Failed to archive ended attack %s: %s", attack_id, e)
         finally:
@@ -605,23 +714,32 @@ def archive_ended_attack(attack_id: str) -> None:
         conn = _connect()
         try:
             conn.execute("""
-                INSERT OR IGNORE INTO attack_history (
+                INSERT INTO attack_history (
                     attack_id, src_ip, attack_type, attack_status, severity,
                     connection_count, failed_count, success_count,
                     unique_passwords, command_count, suspicious_cmds, commands,
                     start_time, last_seen_time, ended_time, renewed_count,
                     location, latitude, longitude, destination_port, archived_at
-                )
-                SELECT attack_id, src_ip, attack_type, attack_status, severity,
-                       connection_count, failed_count, success_count,
-                       unique_passwords, command_count, suspicious_cmds, commands,
-                       start_time, last_seen_time, ended_time, renewed_count,
-                       location, latitude, longitude, destination_port, ?
-                FROM attack_context
-                WHERE attack_id = ? AND attack_status = 'ended'
-            """, (_utc_now(), attack_id))
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (attack_id) DO UPDATE SET
+                    attack_status     = 'ended',
+                    connection_count  = MAX(attack_history.connection_count, excluded.connection_count),
+                    failed_count      = MAX(attack_history.failed_count, excluded.failed_count),
+                    success_count     = MAX(attack_history.success_count, excluded.success_count),
+                    unique_passwords  = MAX(attack_history.unique_passwords, excluded.unique_passwords),
+                    command_count     = MAX(attack_history.command_count, excluded.command_count),
+                    suspicious_cmds   = MAX(attack_history.suspicious_cmds, excluded.suspicious_cmds),
+                    commands          = CASE WHEN excluded.commands IS NOT NULL AND excluded.commands != '[]' THEN excluded.commands ELSE attack_history.commands END,
+                    ended_time        = COALESCE(excluded.ended_time, datetime('now'))
+            """, (
+                attack_id, src_ip, attack_type, attack_status, severity,
+                connection_count, failed_count, success_count,
+                unique_passwords, command_count, suspicious_cmds, _json(commands),
+                start_time, last_seen_time, ended_time, renewed_count,
+                location, latitude, longitude, destination_port, _utc_now()
+            ))
             conn.commit()
-            log.info("Archived ended attack %s to attack_history (SQLite)", attack_id)
+            log.info("Archived ended attack %s to attack_history (SQLite, commands=%d, connections=%d)", attack_id, len(commands), connection_count)
         except Exception as e:
             log.error("Failed to archive ended attack %s (SQLite): %s", attack_id, e)
         finally:
@@ -629,25 +747,27 @@ def archive_ended_attack(attack_id: str) -> None:
 
 
 def load_attack_history(limit: int = 200) -> list[dict]:
-    """Load finalized attacks from the immutable attack_history table."""
+    """Load finalized attacks from the immutable attack_history table with distinct attack_ids."""
     results = []
     if _use_postgres():
         conn = _connect_postgres()
         try:
             with conn.cursor() as cur:
                 cur.execute("""
-                    SELECT attack_id, src_ip, attack_type, attack_status, severity,
+                    SELECT DISTINCT ON (attack_id)
+                           attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
                            location, latitude, longitude, destination_port, archived_at
                     FROM public.attack_history
-                    ORDER BY ended_time DESC, id DESC
+                    ORDER BY attack_id, ended_time DESC NULLS LAST, id DESC
                     LIMIT %s
                 """, (limit,))
                 cols = [d[0] for d in cur.description]
                 for row in cur.fetchall():
                     results.append(dict(zip(cols, row)))
+                results.sort(key=lambda x: str(x.get("ended_time") or x.get("last_seen_time") or ""), reverse=True)
         except Exception as e:
             log.error("load_attack_history postgres error: %s", e)
         finally:
@@ -662,7 +782,10 @@ def load_attack_history(limit: int = 200) -> list[dict]:
                            unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time,
                            location, latitude, longitude, destination_port, archived_at
-                    FROM attack_history
+                    FROM (
+                        SELECT * FROM attack_history ORDER BY ended_time DESC, id DESC
+                    )
+                    GROUP BY attack_id
                     ORDER BY ended_time DESC, id DESC
                     LIMIT ?
                 """, (limit,))
@@ -685,7 +808,7 @@ def archive_active_attacks() -> None:
     """End + archive any still-active attack_context rows into attack_history.
 
     Called before the idle-reset truncate so finished sessions are not silently
-    lost from the History tab. Idempotent (ON CONFLICT DO NOTHING).
+    lost from the History tab. Idempotent (ON CONFLICT on attack_id).
     """
     if _use_postgres():
         conn = _connect_postgres()
@@ -703,19 +826,32 @@ def archive_active_attacks() -> None:
                         connection_count, failed_count, success_count,
                         unique_passwords, command_count, suspicious_cmds, commands,
                         start_time, last_seen_time, ended_time, renewed_count,
-                        location, latitude, longitude, destination_port
+                        location, latitude, longitude, destination_port, archived_at
                     )
                     SELECT attack_id, src_ip, attack_type, attack_status, severity,
                            connection_count, failed_count, success_count,
                            unique_passwords, command_count, suspicious_cmds, commands,
                            start_time, last_seen_time, ended_time, renewed_count,
-                           location, latitude, longitude, destination_port
+                           location, latitude, longitude, destination_port, NOW()
                     FROM public.attack_context
                     WHERE attack_status = 'ended'
-                    ON CONFLICT (attack_id, ended_time) DO NOTHING
+                    ON CONFLICT (attack_id) DO UPDATE SET
+                        attack_status     = 'ended',
+                        connection_count  = GREATEST(public.attack_history.connection_count, EXCLUDED.connection_count),
+                        failed_count      = GREATEST(public.attack_history.failed_count, EXCLUDED.failed_count),
+                        success_count     = GREATEST(public.attack_history.success_count, EXCLUDED.success_count),
+                        unique_passwords  = GREATEST(public.attack_history.unique_passwords, EXCLUDED.unique_passwords),
+                        command_count     = GREATEST(public.attack_history.command_count, EXCLUDED.command_count),
+                        suspicious_cmds   = GREATEST(public.attack_history.suspicious_cmds, EXCLUDED.suspicious_cmds),
+                        commands          = CASE 
+                                              WHEN EXCLUDED.commands IS NOT NULL AND jsonb_array_length(EXCLUDED.commands) > 0 THEN EXCLUDED.commands 
+                                              ELSE public.attack_history.commands 
+                                            END,
+                        ended_time        = COALESCE(EXCLUDED.ended_time, NOW()),
+                        archived_at       = NOW()
                 """)
             conn.commit()
-            log.info("Archived active attacks to attack_history before reset")
+            log.info("Archived active attacks to attack_history before reset (rowcount=%d)", cur.rowcount)
         except Exception as e:
             log.error("Failed to archive active attacks before reset: %s", e)
         finally:
@@ -733,7 +869,7 @@ def archive_active_attacks() -> None:
                 WHERE attack_status IN ('new', 'ongoing', 'renewed')
             """, (now,))
             conn.execute("""
-                INSERT OR IGNORE INTO attack_history (
+                INSERT INTO attack_history (
                     attack_id, src_ip, attack_type, attack_status, severity,
                     connection_count, failed_count, success_count,
                     unique_passwords, command_count, suspicious_cmds, commands,
@@ -747,6 +883,16 @@ def archive_active_attacks() -> None:
                        location, latitude, longitude, destination_port, ?
                 FROM attack_context
                 WHERE attack_status = 'ended'
+                ON CONFLICT (attack_id) DO UPDATE SET
+                    attack_status     = 'ended',
+                    connection_count  = MAX(attack_history.connection_count, excluded.connection_count),
+                    failed_count      = MAX(attack_history.failed_count, excluded.failed_count),
+                    success_count     = MAX(attack_history.success_count, excluded.success_count),
+                    unique_passwords  = MAX(attack_history.unique_passwords, excluded.unique_passwords),
+                    command_count     = MAX(attack_history.command_count, excluded.command_count),
+                    suspicious_cmds   = MAX(attack_history.suspicious_cmds, excluded.suspicious_cmds),
+                    commands          = CASE WHEN excluded.commands IS NOT NULL AND excluded.commands != '[]' THEN excluded.commands ELSE attack_history.commands END,
+                    ended_time        = COALESCE(excluded.ended_time, datetime('now'))
             """, (now,))
             conn.commit()
             log.info("Archived active attacks to attack_history before reset (SQLite)")

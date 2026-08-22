@@ -631,7 +631,14 @@ function App() {
         if (!res.ok) return;
         const data = await res.json();
         if (data.status === 'success' && Array.isArray(data.history)) {
-          setHistoryList(data.history.map(mapAttackContextToCard));
+          const seen = new Set();
+          const uniqueHistory = data.history.filter(item => {
+            const key = item?.attack_id || item?.id;
+            if (!key || seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setHistoryList(uniqueHistory.map(mapAttackContextToCard));
         }
       } catch (e) {
         console.warn('[history] fetch error:', e);

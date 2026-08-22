@@ -252,6 +252,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
     """Manually end an attack session server-side."""
     conn = None
     try:
+        live_ctx = _live_contexts.get(attack_id)
         conn = _connect_postgres()
         with conn.cursor() as cur:
             cur.execute(
@@ -259,7 +260,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
                 (attack_id,)
             )
             conn.commit()
-            archive_ended_attack(attack_id)
+            archive_ended_attack(attack_id, payload=live_ctx)
             
         # Also remove from live contexts if it exists there
         if attack_id in _live_contexts:
