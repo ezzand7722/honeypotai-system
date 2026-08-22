@@ -1,13 +1,6 @@
 import React, { useState } from 'react';
 import LiveMap from './LiveMap';
 
-/**
- * HistoryModule
- *
- * Screen 1 (Default): Full attack history archive list.
- * Screen 2 (On Card Click): ONLY the chosen attack's 3D Globe and forensic details,
- * with strictly ONE "BACK TO ARCHIVE" button.
- */
 const HistoryModule = ({ historyList = [], onClearHistory }) => {
   const [selectedHistory, setSelectedHistory] = useState(null);
 
@@ -102,7 +95,7 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
             <button
               onClick={() => setSelectedHistory(null)}
               style={{
-                padding: '10px 18px',
+                padding: '10px 20px',
                 background: '#00ff41',
                 border: '1px solid #00ff41',
                 color: '#000',
@@ -137,8 +130,8 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
         display: 'flex',
         flexDirection: 'column'
       }}>
-        {!selectedHistory ? (
-          /* ═══════════ VIEW 1: FULL ARCHIVE LIST ONLY ═══════════ */
+        {selectedHistory === null ? (
+          /* ═══════════ SCREEN 1: ARCHIVE CARDS LIST ONLY ═══════════ */
           historyList.length === 0 ? (
             <div style={{
               flex: 1,
@@ -164,9 +157,9 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
               paddingBottom: '20px',
               paddingRight: '10px'
             }}>
-              {historyList.map((item) => (
+              {historyList.map((item, idx) => (
                 <div 
-                  key={item.id} 
+                  key={item.id || idx} 
                   onClick={() => setSelectedHistory(item)}
                   style={{
                     border: '1px solid rgba(0, 255, 65, 0.3)',
@@ -240,7 +233,7 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
             </div>
           )
         ) : (
-          /* ═══════════ VIEW 2: ONLY SELECTED ATTACK (GLOBE + DETAILS) ═══════════ */
+          /* ═══════════ SCREEN 2: ONLY 3D GLOBE AND THREAT DETAILS (CARDS 100% REMOVED) ═══════════ */
           <div className="split-layout" style={{ 
             display: 'grid', 
             gridTemplateColumns: '1.2fr 1fr', 
@@ -248,7 +241,7 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
             height: '100%', 
             minHeight: 0 
           }}>
-            {/* Left Column: 3D Globe of this attack only */}
+            {/* Left Column: 3D Globe of this attack vector only */}
             <div style={{ 
               border: '1px solid rgba(0,255,65,0.3)', 
               background: '#000', 
@@ -283,7 +276,7 @@ const HistoryModule = ({ historyList = [], onClearHistory }) => {
               </div>
             </div>
 
-            {/* Right Column: Complete Forensic Detail of this attack */}
+            {/* Right Column: Threat Actor Profile & Forensic Details ONLY */}
             <div style={{ 
               border: '1px solid rgba(0,255,65,0.4)', 
               display: 'flex', 
