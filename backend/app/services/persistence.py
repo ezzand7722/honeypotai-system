@@ -251,6 +251,14 @@ def initialize_database() -> None:
                         archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """)
+                # Deduplicate before unique index — session-split experiments
+                # may have left multiple rows per attack_id.
+                cur.execute("""
+                    DELETE FROM public.attack_history a
+                    USING public.attack_history b
+                    WHERE a.attack_id = b.attack_id
+                      AND a.ctid < b.ctid
+                """)
                 cur.execute("""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_attack_history_attack_id
                         ON public.attack_history (attack_id)
