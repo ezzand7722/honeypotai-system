@@ -123,11 +123,37 @@ try:
                       AND last_seen_time < NOW() - INTERVAL '5 minutes'
                 """)
 
-                # NOTE: the old "end ghost Unknown rows for IPs that also have a
-                # typed session" cleanup was removed. Sessions are now keyed by
-                # honeypot session id, so one device can legitimately have
-                # several concurrent sessions and a young session may still be
-                # "Unknown" — killing it per-IP broke back-to-back attacks.
+                # Clean up any ghost "Unknown" rows that were superseded by a
+                # real-typed session for the same IP (from the type-promotion
+                # path in ai_v2.py).
+                cur.execute("""
+                    SELECT ghost.attack_id FROM public.attack_context ghost
+                    WHERE ghost.attack_type = 'Unknown'
+                      AND ghost.attack_status IN ('new', 'ongoing', 'renewed')
+                      AND EXISTS (
+                          SELECT 1 FROM public.attack_context real
+                          WHERE real.src_ip = ghost.src_ip
+                            AND real.attack_type != 'Unknown'
+                            AND real.attack_status IN ('new', 'ongoing', 'renewed')
+                      )
+                """)
+                ghost_ids = [r[0] for r in cur.fetchall()]
+                if ghost_ids:
+                    cur.execute("""
+                        UPDATE public.attack_context
+                        SET attack_status = 'ended',
+                            ended_time    = NOW()
+                        WHERE attack_type = 'Unknown'
+                          AND attack_status IN ('new', 'ongoing', 'renewed')
+                          AND EXISTS (
+                              SELECT 1 FROM public.attack_context real
+                              WHERE real.src_ip = public.attack_context.src_ip
+                                AND real.attack_type != 'Unknown'
+                                AND real.attack_status IN ('new', 'ongoing', 'renewed')
+                          )
+                    """)
+                    expired_ids.extend(ghost_ids)
+                    log.info("Ended %d ghost Unknown sessions superseded by real-typed sessions", len(ghost_ids))
 
             conn.commit()
             log.info("Successfully executed DB session sweep for expired sessions.")
@@ -257,17 +283,14 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
         log.exception("Error processing logs in DynamicAttackTracker: %s", e)
         return {}
 
-    # Keyed by (src_ip, honeypot_session): one device/IP can launch several
-    # attacks back-to-back — each cowrie session is its own attack and must
-    # never merge into the previous one.
     results_by_ip = {}
     if results:
         for r in results:
-            results_by_ip[(r.get("src_ip"), str(r.get("session") or ""))] = r
+            results_by_ip[r.get("src_ip")] = r
 
     # Re-derive attack_type from accumulated counts to fix single-event
     # misclassification (I2) and restore Command Injection category (I8).
-    for _key, result in results_by_ip.items():
+    for ip, result in results_by_ip.items():
         failed = result.get("failed_count", 0)
         success = result.get("success_count", 0)
         unique_passwords = result.get("unique_passwords", 0)
@@ -284,20 +307,19 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
             result["attack_type"] = "Unknown"
 
     # Reconstruct commands and destination_port from formatted_logs (I3, I4, I7).
-    # Groups logs by (src_ip, session) and extracts command strings + dst_port.
+    # Groups logs by src_ip and extracts command strings + dst_port.
     import re as _re
-    _ip_commands: dict[tuple, list[str]] = {}
-    _ip_dst_port: dict[tuple, int | None] = {}
+    _ip_commands: dict[str, list[str]] = {}
+    _ip_dst_port: dict[str, int | None] = {}
     for log_item in formatted_logs:
         lip = log_item.get("src_ip")
         if not lip:
             continue
-        lkey = (lip, str(log_item.get("session") or ""))
         # Extract destination port
         dp = log_item.get("dst_port")
-        if dp and lkey not in _ip_dst_port:
+        if dp and lip not in _ip_dst_port:
             try:
-                _ip_dst_port[lkey] = int(dp)
+                _ip_dst_port[lip] = int(dp)
             except (ValueError, TypeError):
                 pass
         # Extract command from known fields
@@ -317,13 +339,13 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
                     cmd = str(val).strip()[:500]
                     break
         if cmd:
-            _ip_commands.setdefault(lkey, []).append(cmd)
+            _ip_commands.setdefault(lip, []).append(cmd)
 
-    for key, result in results_by_ip.items():
+    for ip, result in results_by_ip.items():
         # Tracker keeps the full accumulated command list across chunks/re-uploads;
         # per-chunk reconstruction below is only a fallback (e.g. fresh formats).
-        result["commands"] = result.get("commands") or _ip_commands.get(key, [])
-        result["destination_port"] = _ip_dst_port.get(key)
+        result["commands"] = result.get("commands") or _ip_commands.get(ip, [])
+        result["destination_port"] = _ip_dst_port.get(ip)
 
     # Extract location from the incoming logs so we don't do a second mmdb lookup
     ip_to_geo = {}
@@ -338,7 +360,7 @@ async def _run_ai_script(formatted_logs: list[Dict[str, Any]]) -> Dict[str, Any]
             }
 
     # Persist each AI v2 result to attack_context table + push to live WS feed
-    for (ip, _sess), result in results_by_ip.items():
+    for ip, result in results_by_ip.items():
         try:
             geo = ip_to_geo.get(ip, {})
             result["location"] = geo.get("location") or STATIC_LOCATION
@@ -413,9 +435,7 @@ async def submit_for_scoring(event: EnrichedEvent, original_log: Optional[Dict[s
     log.info("SUBMIT_TO_AI: event_id=%s src_ip=%s", event.event_id, formatted_log.get("src_ip"))
 
     results_by_ip = await _run_ai_script([formatted_log])
-    result = results_by_ip.get(
-        (formatted_log.get("src_ip", ""), str(formatted_log.get("session") or "")), {}
-    )
+    result = results_by_ip.get(formatted_log.get("src_ip", ""), {})
 
     prediction = _build_prediction(event.event_id, formatted_log, result)
     await asyncio.to_thread(attach_prediction, event.event_id, prediction)
@@ -474,9 +494,7 @@ async def submit_batch_for_scoring(
                 # One batched write per chunk instead of one roundtrip per event
                 prediction_pairs = []
                 for event, formatted_log in zip(event_chunk, formatted_chunk):
-                    result = results_by_ip.get(
-                        (formatted_log.get("src_ip", ""), str(formatted_log.get("session") or "")), {}
-                    )
+                    result = results_by_ip.get(formatted_log.get("src_ip", ""), {})
                     prediction = _build_prediction(event.event_id, formatted_log, result, pipeline_info)
                     prediction_pairs.append((event.event_id, prediction))
                 await asyncio.to_thread(attach_predictions_batch, prediction_pairs)

@@ -107,8 +107,7 @@ def normalize_ai_output_for_frontend(raw: Dict[str, Any]) -> Dict[str, Any]:
         "location":         raw.get("location"),
         "latitude":         raw.get("latitude"),
         "longitude":        raw.get("longitude"),
-        # Honeypot management port — shown whenever the logs carried no port.
-        "destination_port": raw.get("destination_port") or 2222,
+        "destination_port": raw.get("destination_port"),
         # Signals
         "signal":            signal,
         # Real attacker commands captured from the logs (post-AI, keyed to this IP+type)
@@ -178,9 +177,25 @@ def list_attack_contexts(
         # Default live feed: hide ended so UI does not thrash add/remove
         results = [r for r in results if r["attack_status"] != "ended"]
 
-    # NOTE: no per-IP collapse here. One device/IP can launch several attacks
-    # (different honeypot sessions) and each one must stay its own live card.
-    # Duplicates are already removed by attack_id in the `merged` dict above.
+    def _metric_score(r: Dict) -> int:
+        return (
+            int(r.get("failed_count") or 0)
+            + int(r.get("unique_passwords") or 0)
+            + int(r.get("command_count") or 0)
+            + int(r.get("connection_count") or 0)
+            + int(r.get("success_count") or 0)
+        )
+
+    # Collapse multiple sessions for the same IP into one card (richest wins).
+    by_ip: Dict[str, Dict] = {}
+    for r in results:
+        ip = r.get("src_ip") or r.get("attack_id") or ""
+        if not ip:
+            continue
+        prev = by_ip.get(ip)
+        if prev is None or _metric_score(r) >= _metric_score(prev):
+            by_ip[ip] = r
+    results = list(by_ip.values())
 
     results.sort(key=lambda x: (x.get("last_seen_time") or "", x.get("severity_score", 0)), reverse=True)
 
@@ -237,6 +252,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
     """Manually end an attack session server-side."""
     conn = None
     try:
+        live_ctx = _live_contexts.get(attack_id)
         conn = _connect_postgres()
         with conn.cursor() as cur:
             cur.execute(
@@ -244,7 +260,7 @@ def end_attack_context(attack_id: str) -> Dict[str, Any]:
                 (attack_id,)
             )
             conn.commit()
-            archive_ended_attack(attack_id)
+            archive_ended_attack(attack_id, payload=live_ctx)
             
         # Also remove from live contexts if it exists there
         if attack_id in _live_contexts:

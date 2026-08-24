@@ -57,6 +57,11 @@ class DynamicAttackTracker:
                 fresh.append(ev)
         return fresh
 
+    def _forget_ip(self, ip):
+        ip = str(ip)
+        for key in [k for k in self._seen_events if k[0] == ip]:
+            self._seen_events.pop(key, None)
+
     def _is_suspicious(self, text):
         text = str(text).lower()
         return bool(re.search(SUSPICIOUS_PATTERN, text))
@@ -108,19 +113,10 @@ class DynamicAttackTracker:
                 axis=1
             )
 
-        # Honeypot session resolution: every cowrie connection carries a unique
-        # `session` id. Two attacks from the SAME device/IP are different
-        # sessions, so we must group by (ip, session) — grouping by ip alone
-        # merges consecutive attacks into one card.
-        if "session" in df.columns:
-            df["normalized_session"] = df["session"].fillna("").astype(str).str.strip()
-        else:
-            df["normalized_session"] = ""
-
         extracted = []
-        grouped = df.groupby(["normalized_ip", "normalized_session"])
+        grouped = df.groupby("normalized_ip")
 
-        for (ip, session_id), group in grouped:
+        for ip, group in grouped:
             if not ip or ip == "nan" or ip == "":
                 continue
 
@@ -153,10 +149,6 @@ class DynamicAttackTracker:
             # Event ID based accurate counting
             eventid = group["eventid"].astype(str).str.lower() if "eventid" in group.columns else pd.Series([], dtype=str)
 
-            # The honeypot tells us when the attacker's connection closed —
-            # that is the hard boundary of this attack session.
-            session_closed = bool(eventid.str.contains("session.closed", na=False).any()) if len(eventid) else False
-
             total_conns = int(eventid.str.contains("session.connect", na=False).sum())
             if total_conns == 0:
                 if eventid.str.startswith("cowrie.", na=False).any():
@@ -182,8 +174,6 @@ class DynamicAttackTracker:
 
             extracted.append({
                 "src_ip": ip,
-                "session": str(session_id or ""),
-                "session_closed": session_closed,
                 "connection_count": total_conns,
                 "success_count": total_succ,
                 "failed_count": total_fails,
@@ -262,23 +252,12 @@ class DynamicAttackTracker:
         with self.lock:
             for _, row in df_features.iterrows():
                 ip = row["src_ip"]
-                session_id = str(row.get("session") or "")
-
-                # Match the ongoing context for THIS specific honeypot session.
-                # Same IP + different session = a brand new attack, never merge.
-                # (Legacy: events without a session id attach to any ongoing
-                # context of that IP, preserving old behavior for plain logs.)
+                
+                # Check if an existing context already exists for this IP regardless of type to prevent splitting/flipping
                 existing_ctx = None
                 existing_key = None
                 for key, ctx in self.context_table.items():
-                    if key[0] != ip or ctx["status"] != "ongoing":
-                        continue
-                    if session_id:
-                        if ctx.get("session") == session_id:
-                            existing_ctx = ctx
-                            existing_key = key
-                            break
-                    else:
+                    if key[0] == ip and ctx["status"] == "ongoing":
                         existing_ctx = ctx
                         existing_key = key
                         break
@@ -305,21 +284,9 @@ class DynamicAttackTracker:
                     ctx["severity"] = sev
                     ctx["status"] = status
                 else:
-                    # A stray session.closed with no live context and no real
-                    # activity is just a connection closer — don't spawn a
-                    # garbage card for it.
-                    if (
-                        bool(row.get("session_closed"))
-                        and int(row["connection_count"]) == 0
-                        and int(row["failed_count"]) == 0
-                        and int(row["success_count"]) == 0
-                        and int(row["command_count"]) == 0
-                    ):
-                        continue
-
                     # Classify only once on session creation using aggregated initial row metrics
                     a_type = self.classify_attack_type(row)
-                    context_key = (ip, session_id) if session_id else (ip, a_type)
+                    context_key = (ip, a_type)
                     status = "new"
                     duration = 0.0
                     sev = self.calculate_severity(row, ongoing_duration=duration)
@@ -327,7 +294,6 @@ class DynamicAttackTracker:
                     ctx = {
                         "attack_id": str(uuid.uuid4()),
                         "src_ip": ip,
-                        "session": session_id,
                         "attack_type": a_type,
                         "status": "ongoing",
                         "severity": sev,
@@ -347,7 +313,6 @@ class DynamicAttackTracker:
                 out_payload = {
                     "attack_id": ctx["attack_id"],
                     "src_ip": ctx["src_ip"],
-                    "session": ctx.get("session", ""),
                     "attack": "Attack",
                     "attack_type": ctx["attack_type"],
                     "attack_status": status,
@@ -361,22 +326,6 @@ class DynamicAttackTracker:
                     "commands": ctx.get("_commands", []),
                     "duration_seconds": round(now - ctx["start_time"], 2)
                 }
-
-                # Session boundary: the honeypot closed the connection, or the
-                # attacker typed `exit`. Finalize this attack RIGHT NOW so the
-                # next session from the same device starts a brand-new card
-                # (no merging, no command bleed, no waiting for idle timers).
-                cmds_now = ctx.get("_commands") or []
-                last_cmd = str(cmds_now[-1]).strip().lower() if cmds_now else ""
-                if ctx["status"] == "ongoing" and (bool(row.get("session_closed")) or last_cmd == "exit"):
-                    ctx["status"] = "ended"
-                    out_payload["attack_status"] = "ended"
-                    out_payload["signal"] = "STOP_SENDING_LOGS"
-                    self.context_table.pop(existing_key if existing_ctx else context_key, None)
-                    # NOTE: dedupe state for this session is kept on purpose so
-                    # re-uploading the same log file cannot spawn duplicate
-                    # attacks. Splitting is handled by the session key itself.
-
                 output_records.append(out_payload)
 
             threading.Thread(target=self._check_attack_expirations, daemon=True).start()
@@ -412,8 +361,7 @@ class DynamicAttackTracker:
                     if self.callback_on_ended:
                         self.callback_on_ended(ended_payload)
                     self.context_table.pop(key, None)
-                    # Dedupe state kept (see process_incoming_logs) — memory is
-                    # bounded by _MAX_SEEN_EVENTS eviction.
+                    self._forget_ip(ctx.get("src_ip"))
 
     def end_session(self, attack_id=None):
         """Remove an in-memory session by attack_id (or all if None).
@@ -429,6 +377,7 @@ class DynamicAttackTracker:
             for key, ctx in list(self.context_table.items()):
                 if ctx.get("attack_id") == attack_id:
                     self.context_table.pop(key, None)
+                    self._forget_ip(ctx.get("src_ip"))
 
     def reset(self):
         """Clear all in-memory session state (used on DB reset / startup)."""
